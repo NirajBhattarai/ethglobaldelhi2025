@@ -1,0 +1,30 @@
+{
+  "name": "hedera-hardhat",
+  "version": "1.0.0",
+  "description": "Hedera smart contracts using Hardhat",
+  "main": "index.js",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "deploy": "hardhat run scripts/deploy.ts",
+    "deploy:testnet": "hardhat run scripts/deploy.ts --network hedera_testnet",
+    "deploy:mainnet": "hardhat run scripts/deploy.ts --network hedera_mainnet",
+    "node": "hardhat node",
+    "clean": "hardhat clean",
+    "coverage": "hardhat coverage"
+  },
+  "keywords": ["hedera", "hardhat", "smart-contracts"],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@hashgraph/hardhat-hethers": "^1.0.4",
+    "@nomicfoundation/hardhat-toolbox": "^6.1.0",
+    "dotenv": "^17.2.2",
+    "hardhat": "^2.26.3",
+    "hardhat-deploy": "^0.12.4",
+    "prettier": "^3.6.2",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.2"
+  }
+}
