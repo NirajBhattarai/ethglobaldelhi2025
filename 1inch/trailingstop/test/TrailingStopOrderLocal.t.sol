@@ -180,18 +180,239 @@ contract TrailingStopOrderLocalTest is Test {
     // ============ Test Placeholders ============
     
     /**
-     * @notice Placeholder for testing trailing stop configuration on local testnet
-     * @dev Add your test logic here
+     * @notice Test trailing stop configuration with valid parameters on local testnet
+     * @dev Tests the configureTrailingStop function with mock oracles
      */
     function testConfigureTrailingStopLocal() public {
-        // TODO: Implement test for configureTrailingStop function on local testnet
-        // Test cases to consider:
-        // 1. Valid configuration with mock oracle
-        // 2. Invalid oracle address (zero address)
-        // 3. Invalid initial stop price (zero)
-        // 4. Event emission verification
-        // 5. State updates verification
-        // 6. Gas usage optimization
+        // Arrange
+        bytes32 orderHash = createOrderHash("local-test-order-1");
+        uint256 initialStopPrice = convertTo18Decimals(1900e8); // $1900 in 18 decimals
+        uint256 trailingDistance = convertTo18Decimals(50e8); // $50 in 18 decimals
+        
+        TrailingStopOrder.TrailingStopConfig memory config = createTrailingStopConfig(
+            address(ethUsdOracle),
+            initialStopPrice,
+            trailingDistance
+        );
+        
+        // Act
+        vm.prank(maker);
+        trailingStopOrder.configureTrailingStop(orderHash, config);
+        
+        // Assert
+        (AggregatorV3Interface oracle, uint256 storedInitialStopPrice, uint256 storedTrailingDistance, uint256 storedCurrentStopPrice) = 
+            trailingStopOrder.trailingStopConfigs(orderHash);
+        
+        assertEq(address(oracle), address(ethUsdOracle));
+        assertEq(storedInitialStopPrice, initialStopPrice);
+        assertEq(storedTrailingDistance, trailingDistance);
+        assertEq(storedCurrentStopPrice, initialStopPrice);
+    }
+    
+    /**
+     * @notice Test trailing stop configuration with invalid oracle address on local testnet
+     * @dev Tests error handling for zero address oracle
+     */
+    function testConfigureTrailingStopInvalidOracleLocal() public {
+        // Arrange
+        bytes32 orderHash = createOrderHash("local-test-order-2");
+        uint256 initialStopPrice = convertTo18Decimals(1900e8);
+        uint256 trailingDistance = convertTo18Decimals(50e8);
+        
+        TrailingStopOrder.TrailingStopConfig memory config = createTrailingStopConfig(
+            address(0), // Invalid oracle address
+            initialStopPrice,
+            trailingDistance
+        );
+        
+        // Act & Assert
+        vm.prank(maker);
+        vm.expectRevert(TrailingStopOrder.InvalidMakerAssetOracle.selector);
+        trailingStopOrder.configureTrailingStop(orderHash, config);
+    }
+    
+    /**
+     * @notice Test trailing stop configuration with invalid initial stop price on local testnet
+     * @dev Tests error handling for zero initial stop price
+     */
+    function testConfigureTrailingStopInvalidPriceLocal() public {
+        // Arrange
+        bytes32 orderHash = createOrderHash("local-test-order-3");
+        uint256 initialStopPrice = 0; // Invalid price
+        uint256 trailingDistance = convertTo18Decimals(50e8);
+        
+        TrailingStopOrder.TrailingStopConfig memory config = createTrailingStopConfig(
+            address(ethUsdOracle),
+            initialStopPrice,
+            trailingDistance
+        );
+        
+        // Act & Assert
+        vm.prank(maker);
+        vm.expectRevert(TrailingStopOrder.InvalidTrailingDistance.selector);
+        trailingStopOrder.configureTrailingStop(orderHash, config);
+    }
+    
+    /**
+     * @notice Test trailing stop configuration event emission on local testnet
+     * @dev Tests that the correct event is emitted with proper parameters
+     */
+    function testConfigureTrailingStopEventEmissionLocal() public {
+        // Arrange
+        bytes32 orderHash = createOrderHash("local-test-order-4");
+        uint256 initialStopPrice = convertTo18Decimals(1900e8);
+        uint256 trailingDistance = convertTo18Decimals(50e8);
+        
+        TrailingStopOrder.TrailingStopConfig memory config = createTrailingStopConfig(
+            address(ethUsdOracle),
+            initialStopPrice,
+            trailingDistance
+        );
+        
+        // Act & Assert
+        vm.prank(maker);
+        vm.expectEmit(true, true, false, true);
+        emit TrailingStopOrder.TrailingStopConfigUpdated(
+            maker,
+            address(ethUsdOracle),
+            initialStopPrice,
+            trailingDistance
+        );
+        trailingStopOrder.configureTrailingStop(orderHash, config);
+    }
+    
+    /**
+     * @notice Test trailing stop configuration with BTC oracle on local testnet
+     * @dev Tests configuration with different mock oracle (BTC/USD)
+     */
+    function testConfigureTrailingStopWithBTCOracleLocal() public {
+        // Arrange
+        bytes32 orderHash = createOrderHash("local-test-order-5");
+        uint256 initialStopPrice = convertTo18Decimals(44000e8); // $44000 in 18 decimals
+        uint256 trailingDistance = convertTo18Decimals(1000e8); // $1000 in 18 decimals
+        
+        TrailingStopOrder.TrailingStopConfig memory config = createTrailingStopConfig(
+            address(btcUsdOracle),
+            initialStopPrice,
+            trailingDistance
+        );
+        
+        // Act
+        vm.prank(maker);
+        trailingStopOrder.configureTrailingStop(orderHash, config);
+        
+        // Assert
+        (AggregatorV3Interface oracle, uint256 storedInitialStopPrice, uint256 storedTrailingDistance, uint256 storedCurrentStopPrice) = 
+            trailingStopOrder.trailingStopConfigs(orderHash);
+        
+        assertEq(address(oracle), address(btcUsdOracle));
+        assertEq(storedInitialStopPrice, initialStopPrice);
+        assertEq(storedTrailingDistance, trailingDistance);
+        assertEq(storedCurrentStopPrice, initialStopPrice);
+    }
+    
+    /**
+     * @notice Test trailing stop configuration update on local testnet
+     * @dev Tests that configuration can be updated for the same order hash
+     */
+    function testConfigureTrailingStopUpdateLocal() public {
+        // Arrange
+        bytes32 orderHash = createOrderHash("local-test-order-6");
+        uint256 initialStopPrice1 = convertTo18Decimals(1900e8);
+        uint256 trailingDistance1 = convertTo18Decimals(50e8);
+        uint256 initialStopPrice2 = convertTo18Decimals(2000e8);
+        uint256 trailingDistance2 = convertTo18Decimals(100e8);
+        
+        TrailingStopOrder.TrailingStopConfig memory config1 = createTrailingStopConfig(
+            address(ethUsdOracle),
+            initialStopPrice1,
+            trailingDistance1
+        );
+        
+        TrailingStopOrder.TrailingStopConfig memory config2 = createTrailingStopConfig(
+            address(btcUsdOracle),
+            initialStopPrice2,
+            trailingDistance2
+        );
+        
+        // Act
+        vm.prank(maker);
+        trailingStopOrder.configureTrailingStop(orderHash, config1);
+        
+        vm.prank(maker);
+        trailingStopOrder.configureTrailingStop(orderHash, config2);
+        
+        // Assert
+        (AggregatorV3Interface oracle, uint256 storedInitialStopPrice, uint256 storedTrailingDistance, uint256 storedCurrentStopPrice) = 
+            trailingStopOrder.trailingStopConfigs(orderHash);
+        
+        assertEq(address(oracle), address(btcUsdOracle));
+        assertEq(storedInitialStopPrice, initialStopPrice2);
+        assertEq(storedTrailingDistance, trailingDistance2);
+        assertEq(storedCurrentStopPrice, initialStopPrice2);
+    }
+    
+    /**
+     * @notice Test trailing stop configuration with different users on local testnet
+     * @dev Tests that different users can configure different orders
+     */
+    function testConfigureTrailingStopDifferentUsersLocal() public {
+        // Arrange
+        bytes32 orderHash1 = createOrderHash("user1-order");
+        bytes32 orderHash2 = createOrderHash("user2-order");
+        uint256 initialStopPrice = convertTo18Decimals(1900e8);
+        uint256 trailingDistance = convertTo18Decimals(50e8);
+        
+        TrailingStopOrder.TrailingStopConfig memory config = createTrailingStopConfig(
+            address(ethUsdOracle),
+            initialStopPrice,
+            trailingDistance
+        );
+        
+        // Act
+        vm.prank(maker);
+        trailingStopOrder.configureTrailingStop(orderHash1, config);
+        
+        vm.prank(taker);
+        trailingStopOrder.configureTrailingStop(orderHash2, config);
+        
+        // Assert
+        (AggregatorV3Interface oracle1, uint256 storedInitialStopPrice1, , ) = 
+            trailingStopOrder.trailingStopConfigs(orderHash1);
+        (AggregatorV3Interface oracle2, uint256 storedInitialStopPrice2, , ) = 
+            trailingStopOrder.trailingStopConfigs(orderHash2);
+        
+        assertEq(address(oracle1), address(ethUsdOracle));
+        assertEq(address(oracle2), address(ethUsdOracle));
+        assertEq(storedInitialStopPrice1, initialStopPrice);
+        assertEq(storedInitialStopPrice2, initialStopPrice);
+    }
+    
+    /**
+     * @notice Test trailing stop configuration gas usage on local testnet
+     * @dev Tests gas efficiency of configuration function
+     */
+    function testConfigureTrailingStopGasUsageLocal() public {
+        // Arrange
+        bytes32 orderHash = createOrderHash("gas-test-order");
+        uint256 initialStopPrice = convertTo18Decimals(1900e8);
+        uint256 trailingDistance = convertTo18Decimals(50e8);
+        
+        TrailingStopOrder.TrailingStopConfig memory config = createTrailingStopConfig(
+            address(ethUsdOracle),
+            initialStopPrice,
+            trailingDistance
+        );
+        
+        // Act
+        vm.prank(maker);
+        uint256 gasStart = gasleft();
+        trailingStopOrder.configureTrailingStop(orderHash, config);
+        uint256 gasUsed = gasStart - gasleft();
+        
+        // Assert
+        console.log("Gas used for configureTrailingStop:", gasUsed);
+        assertTrue(gasUsed < 200000, "Gas usage should be reasonable");
     }
     
     /**
