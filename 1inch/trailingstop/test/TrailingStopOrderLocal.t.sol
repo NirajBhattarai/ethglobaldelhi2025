@@ -191,7 +191,10 @@ contract TrailingStopOrderLocalTest is Test {
             AggregatorV3Interface oracle,
             uint256 storedInitialStopPrice,
             uint256 storedTrailingDistance,
-            uint256 storedCurrentStopPrice
+            uint256 storedCurrentStopPrice,
+            uint256 configuredAt,
+            uint256 lastUpdateAt,
+            uint256 updateFrequency
         ) = trailingStopOrder.trailingStopConfigs(orderHash);
 
         assertEq(address(oracle), address(ethUsdOracle));
@@ -285,7 +288,10 @@ contract TrailingStopOrderLocalTest is Test {
             AggregatorV3Interface oracle,
             uint256 storedInitialStopPrice,
             uint256 storedTrailingDistance,
-            uint256 storedCurrentStopPrice
+            uint256 storedCurrentStopPrice,
+            uint256 configuredAt,
+            uint256 lastUpdateAt,
+            uint256 updateFrequency
         ) = trailingStopOrder.trailingStopConfigs(orderHash);
 
         assertEq(address(oracle), address(btcUsdOracle));
@@ -324,7 +330,10 @@ contract TrailingStopOrderLocalTest is Test {
             AggregatorV3Interface oracle,
             uint256 storedInitialStopPrice,
             uint256 storedTrailingDistance,
-            uint256 storedCurrentStopPrice
+            uint256 storedCurrentStopPrice,
+            uint256 configuredAt,
+            uint256 lastUpdateAt,
+            uint256 updateFrequency
         ) = trailingStopOrder.trailingStopConfigs(orderHash);
 
         assertEq(address(oracle), address(btcUsdOracle));
@@ -355,9 +364,9 @@ contract TrailingStopOrderLocalTest is Test {
         trailingStopOrder.configureTrailingStop(orderHash2, config);
 
         // Assert
-        (AggregatorV3Interface oracle1, uint256 storedInitialStopPrice1,,) =
+        (AggregatorV3Interface oracle1, uint256 storedInitialStopPrice1,,,uint256 configuredAt1,uint256 lastUpdateAt1,uint256 updateFrequency1) =
             trailingStopOrder.trailingStopConfigs(orderHash1);
-        (AggregatorV3Interface oracle2, uint256 storedInitialStopPrice2,,) =
+        (AggregatorV3Interface oracle2, uint256 storedInitialStopPrice2,,,uint256 configuredAt2,uint256 lastUpdateAt2,uint256 updateFrequency2) =
             trailingStopOrder.trailingStopConfigs(orderHash2);
 
         assertEq(address(oracle1), address(ethUsdOracle));

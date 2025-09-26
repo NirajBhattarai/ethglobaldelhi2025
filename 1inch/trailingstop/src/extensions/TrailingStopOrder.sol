@@ -20,6 +20,9 @@ contract TrailingStopOrder is AmountGetterBase {
         uint256 initialStopPrice; // initial stop price in maker asset
         uint256 trailingDistance; // trailing distance in maker asset
         uint256 currentStopPrice; // updated stop price in maker asset
+        uint256 configuredAt; // timestamp when the trailing stop was configured
+        uint256 lastUpdateAt; // timestamp when the trailing stop was last updated
+        uint256 updateFrequency; // Minimum update frequency (seconds)
     }
 
     // constants
@@ -52,6 +55,9 @@ contract TrailingStopOrder is AmountGetterBase {
         storedConfig.initialStopPrice = config.initialStopPrice;
         storedConfig.trailingDistance = config.trailingDistance;
         storedConfig.currentStopPrice = config.initialStopPrice;
+        storedConfig.configuredAt = block.timestamp;
+        storedConfig.lastUpdateAt = block.timestamp;
+        storedConfig.updateFrequency = config.updateFrequency;
 
         emit TrailingStopConfigUpdated(
             maker, address(config.makerAssetOracle), config.initialStopPrice, config.trailingDistance
