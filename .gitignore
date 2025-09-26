@@ -111,14 +111,17 @@ public
 .pnp.*
 
 # Hardhat files
-cache/
-artifacts/
-typechain-types/
+**/hardhat/cache/
+**/hardhat/artifacts/
+**/hardhat/typechain-types/
 
 # Foundry files
-out/
-cache/
-lib/
+**/foundry/out/
+**/foundry/cache/
+**/foundry/lib/
+**/trailingstop/out/
+**/trailingstop/cache/
+**/trailingstop/lib/
 
 # IDE files
 .vscode/
