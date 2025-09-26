@@ -364,10 +364,24 @@ contract TrailingStopOrderLocalTest is Test {
         trailingStopOrder.configureTrailingStop(orderHash2, config);
 
         // Assert
-        (AggregatorV3Interface oracle1, uint256 storedInitialStopPrice1,,,uint256 configuredAt1,uint256 lastUpdateAt1,uint256 updateFrequency1) =
-            trailingStopOrder.trailingStopConfigs(orderHash1);
-        (AggregatorV3Interface oracle2, uint256 storedInitialStopPrice2,,,uint256 configuredAt2,uint256 lastUpdateAt2,uint256 updateFrequency2) =
-            trailingStopOrder.trailingStopConfigs(orderHash2);
+        (
+            AggregatorV3Interface oracle1,
+            uint256 storedInitialStopPrice1,
+            ,
+            ,
+            uint256 configuredAt1,
+            uint256 lastUpdateAt1,
+            uint256 updateFrequency1
+        ) = trailingStopOrder.trailingStopConfigs(orderHash1);
+        (
+            AggregatorV3Interface oracle2,
+            uint256 storedInitialStopPrice2,
+            ,
+            ,
+            uint256 configuredAt2,
+            uint256 lastUpdateAt2,
+            uint256 updateFrequency2
+        ) = trailingStopOrder.trailingStopConfigs(orderHash2);
 
         assertEq(address(oracle1), address(ethUsdOracle));
         assertEq(address(oracle2), address(ethUsdOracle));
