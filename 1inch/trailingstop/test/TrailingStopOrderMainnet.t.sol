@@ -95,27 +95,28 @@ contract TrailingStopOrderTest is Test {
         bytes32 orderHash = createOrderHash("test-order-1");
         uint256 initialStopPrice = 1900e18; // $1900 in 18 decimals
         uint256 trailingDistance = 50e18; // $50 in 18 decimals
-        
-        TrailingStopOrder.TrailingStopConfig memory config = createTrailingStopConfig(
-            ETH_USD_ORACLE,
-            initialStopPrice,
-            trailingDistance
-        );
-        
+
+        TrailingStopOrder.TrailingStopConfig memory config =
+            createTrailingStopConfig(ETH_USD_ORACLE, initialStopPrice, trailingDistance);
+
         // Act
         vm.prank(maker);
         trailingStopOrder.configureTrailingStop(orderHash, config);
-        
+
         // Assert
-        (AggregatorV3Interface oracle, uint256 storedInitialStopPrice, uint256 storedTrailingDistance, uint256 storedCurrentStopPrice) = 
-            trailingStopOrder.trailingStopConfigs(orderHash);
-        
+        (
+            AggregatorV3Interface oracle,
+            uint256 storedInitialStopPrice,
+            uint256 storedTrailingDistance,
+            uint256 storedCurrentStopPrice
+        ) = trailingStopOrder.trailingStopConfigs(orderHash);
+
         assertEq(address(oracle), ETH_USD_ORACLE);
         assertEq(storedInitialStopPrice, initialStopPrice);
         assertEq(storedTrailingDistance, trailingDistance);
         assertEq(storedCurrentStopPrice, initialStopPrice);
     }
-    
+
     /**
      * @notice Test trailing stop configuration with invalid oracle address
      * @dev Tests error handling for zero address oracle
@@ -125,19 +126,19 @@ contract TrailingStopOrderTest is Test {
         bytes32 orderHash = createOrderHash("test-order-2");
         uint256 initialStopPrice = 1900e18;
         uint256 trailingDistance = 50e18;
-        
+
         TrailingStopOrder.TrailingStopConfig memory config = createTrailingStopConfig(
             address(0), // Invalid oracle address
             initialStopPrice,
             trailingDistance
         );
-        
+
         // Act & Assert
         vm.prank(maker);
         vm.expectRevert(TrailingStopOrder.InvalidMakerAssetOracle.selector);
         trailingStopOrder.configureTrailingStop(orderHash, config);
     }
-    
+
     /**
      * @notice Test trailing stop configuration with invalid initial stop price
      * @dev Tests error handling for zero initial stop price
@@ -147,19 +148,16 @@ contract TrailingStopOrderTest is Test {
         bytes32 orderHash = createOrderHash("test-order-3");
         uint256 initialStopPrice = 0; // Invalid price
         uint256 trailingDistance = 50e18;
-        
-        TrailingStopOrder.TrailingStopConfig memory config = createTrailingStopConfig(
-            ETH_USD_ORACLE,
-            initialStopPrice,
-            trailingDistance
-        );
-        
+
+        TrailingStopOrder.TrailingStopConfig memory config =
+            createTrailingStopConfig(ETH_USD_ORACLE, initialStopPrice, trailingDistance);
+
         // Act & Assert
         vm.prank(maker);
         vm.expectRevert(TrailingStopOrder.InvalidTrailingDistance.selector);
         trailingStopOrder.configureTrailingStop(orderHash, config);
     }
-    
+
     /**
      * @notice Test trailing stop configuration event emission
      * @dev Tests that the correct event is emitted with proper parameters
@@ -169,25 +167,17 @@ contract TrailingStopOrderTest is Test {
         bytes32 orderHash = createOrderHash("test-order-4");
         uint256 initialStopPrice = 1900e18;
         uint256 trailingDistance = 50e18;
-        
-        TrailingStopOrder.TrailingStopConfig memory config = createTrailingStopConfig(
-            ETH_USD_ORACLE,
-            initialStopPrice,
-            trailingDistance
-        );
-        
+
+        TrailingStopOrder.TrailingStopConfig memory config =
+            createTrailingStopConfig(ETH_USD_ORACLE, initialStopPrice, trailingDistance);
+
         // Act & Assert
         vm.prank(maker);
         vm.expectEmit(true, true, false, true);
-        emit TrailingStopOrder.TrailingStopConfigUpdated(
-            maker,
-            ETH_USD_ORACLE,
-            initialStopPrice,
-            trailingDistance
-        );
+        emit TrailingStopOrder.TrailingStopConfigUpdated(maker, ETH_USD_ORACLE, initialStopPrice, trailingDistance);
         trailingStopOrder.configureTrailingStop(orderHash, config);
     }
-    
+
     /**
      * @notice Test trailing stop configuration with BTC oracle
      * @dev Tests configuration with different oracle (BTC/USD)
@@ -197,27 +187,28 @@ contract TrailingStopOrderTest is Test {
         bytes32 orderHash = createOrderHash("test-order-5");
         uint256 initialStopPrice = 44000e18; // $44000 in 18 decimals
         uint256 trailingDistance = 1000e18; // $1000 in 18 decimals
-        
-        TrailingStopOrder.TrailingStopConfig memory config = createTrailingStopConfig(
-            BTC_USD_ORACLE,
-            initialStopPrice,
-            trailingDistance
-        );
-        
+
+        TrailingStopOrder.TrailingStopConfig memory config =
+            createTrailingStopConfig(BTC_USD_ORACLE, initialStopPrice, trailingDistance);
+
         // Act
         vm.prank(maker);
         trailingStopOrder.configureTrailingStop(orderHash, config);
-        
+
         // Assert
-        (AggregatorV3Interface oracle, uint256 storedInitialStopPrice, uint256 storedTrailingDistance, uint256 storedCurrentStopPrice) = 
-            trailingStopOrder.trailingStopConfigs(orderHash);
-        
+        (
+            AggregatorV3Interface oracle,
+            uint256 storedInitialStopPrice,
+            uint256 storedTrailingDistance,
+            uint256 storedCurrentStopPrice
+        ) = trailingStopOrder.trailingStopConfigs(orderHash);
+
         assertEq(address(oracle), BTC_USD_ORACLE);
         assertEq(storedInitialStopPrice, initialStopPrice);
         assertEq(storedTrailingDistance, trailingDistance);
         assertEq(storedCurrentStopPrice, initialStopPrice);
     }
-    
+
     /**
      * @notice Test trailing stop configuration update
      * @dev Tests that configuration can be updated for the same order hash
@@ -229,30 +220,28 @@ contract TrailingStopOrderTest is Test {
         uint256 trailingDistance1 = 50e18;
         uint256 initialStopPrice2 = 2000e18;
         uint256 trailingDistance2 = 100e18;
-        
-        TrailingStopOrder.TrailingStopConfig memory config1 = createTrailingStopConfig(
-            ETH_USD_ORACLE,
-            initialStopPrice1,
-            trailingDistance1
-        );
-        
-        TrailingStopOrder.TrailingStopConfig memory config2 = createTrailingStopConfig(
-            BTC_USD_ORACLE,
-            initialStopPrice2,
-            trailingDistance2
-        );
-        
+
+        TrailingStopOrder.TrailingStopConfig memory config1 =
+            createTrailingStopConfig(ETH_USD_ORACLE, initialStopPrice1, trailingDistance1);
+
+        TrailingStopOrder.TrailingStopConfig memory config2 =
+            createTrailingStopConfig(BTC_USD_ORACLE, initialStopPrice2, trailingDistance2);
+
         // Act
         vm.prank(maker);
         trailingStopOrder.configureTrailingStop(orderHash, config1);
-        
+
         vm.prank(maker);
         trailingStopOrder.configureTrailingStop(orderHash, config2);
-        
+
         // Assert
-        (AggregatorV3Interface oracle, uint256 storedInitialStopPrice, uint256 storedTrailingDistance, uint256 storedCurrentStopPrice) = 
-            trailingStopOrder.trailingStopConfigs(orderHash);
-        
+        (
+            AggregatorV3Interface oracle,
+            uint256 storedInitialStopPrice,
+            uint256 storedTrailingDistance,
+            uint256 storedCurrentStopPrice
+        ) = trailingStopOrder.trailingStopConfigs(orderHash);
+
         assertEq(address(oracle), BTC_USD_ORACLE);
         assertEq(storedInitialStopPrice, initialStopPrice2);
         assertEq(storedTrailingDistance, trailingDistance2);
