@@ -5,6 +5,8 @@ pragma solidity ^0.8.23;
 import {Test} from "forge-std/Test.sol";
 import {console} from "forge-std/console.sol";
 import {TrailingStopOrder} from "../src/extensions/TrailingStopOrder.sol";
+import {LimitOrderProtocol} from "../src/LimitOrderProtocol.sol";
+import {IWETH} from "@1inch/solidity-utils/interfaces/IWETH.sol";
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 
 /**
@@ -16,6 +18,7 @@ contract TrailingStopOrderTest is Test {
     // ============ State Variables ============
 
     TrailingStopOrder public trailingStopOrder;
+    LimitOrderProtocol public limitOrderProtocol;
 
     // Mainnet addresses for testing
     address constant ETH_USD_ORACLE = 0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419; // ETH/USD Chainlink Oracle
@@ -30,8 +33,13 @@ contract TrailingStopOrderTest is Test {
     // ============ Setup ============
 
     function setUp() public {
-        // Deploy TrailingStopOrder contract
-        trailingStopOrder = new TrailingStopOrder();
+        // Deploy LimitOrderProtocol contract
+        // For mainnet tests, we'll use a mock WETH address
+        address mockWETH = makeAddr("mockWETH");
+        limitOrderProtocol = new LimitOrderProtocol(IWETH(mockWETH));
+
+        // Deploy TrailingStopOrder contract with LimitOrderProtocol
+        trailingStopOrder = new TrailingStopOrder(address(limitOrderProtocol));
 
         // Setup test accounts
         maker = makeAddr("maker");

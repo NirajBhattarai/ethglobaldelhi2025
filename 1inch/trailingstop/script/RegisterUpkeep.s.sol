@@ -4,6 +4,8 @@ pragma solidity 0.8.23;
 import {Script, console} from "forge-std/Script.sol";
 import {TrailingStopKeeper} from "../src/helpers/TrailingStopKeeper.sol";
 import {TrailingStopOrder} from "../src/extensions/TrailingStopOrder.sol";
+import {LimitOrderProtocol} from "../src/LimitOrderProtocol.sol";
+import {IWETH} from "@1inch/solidity-utils/interfaces/IWETH.sol";
 import {IAutomationRegistry} from "../src/interfaces/IAutomationRegistry.sol";
 import {IAutomationRegistrar} from "../src/interfaces/IAutomationRegistrar.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -39,9 +41,17 @@ contract RegisterUpkeepScript is Script {
         address keeperAddress = vm.envOr("KEEPER_ADDRESS", address(0));
 
         if (trailingStopOrderAddress == address(0)) {
-            console.log("TRAILING_STOP_ORDER_ADDRESS not set, deploying TrailingStopOrder...");
+            console.log("TRAILING_STOP_ORDER_ADDRESS not set, deploying contracts...");
             vm.startBroadcast(deployerPrivateKey);
-            TrailingStopOrder trailingStopOrder = new TrailingStopOrder();
+            
+            // Deploy LimitOrderProtocol first
+            // For script deployment, we'll use a mock WETH address
+            address mockWETH = address(0x1234567890123456789012345678901234567890); // Mock WETH address
+            LimitOrderProtocol limitOrderProtocol = new LimitOrderProtocol(IWETH(mockWETH));
+            console.log("LimitOrderProtocol deployed at:", address(limitOrderProtocol));
+            
+            // Deploy TrailingStopOrder with the deployed LimitOrderProtocol
+            TrailingStopOrder trailingStopOrder = new TrailingStopOrder(address(limitOrderProtocol));
             trailingStopOrderAddress = address(trailingStopOrder);
             vm.stopBroadcast();
             console.log("TrailingStopOrder deployed at:", trailingStopOrderAddress);

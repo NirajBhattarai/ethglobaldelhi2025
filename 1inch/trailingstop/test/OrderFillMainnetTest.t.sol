@@ -36,11 +36,12 @@ contract OrderFillMainnetTest is Test {
         // Deploy LimitOrderProtocol contract
         limitOrderProtocol = new LimitOrderProtocol(IWETH(WETH));
 
-        // Deploy TrailingStopOrder contract
-        trailingStopOrder = new TrailingStopOrder();
+        // Deploy TrailingStopOrder contract with LimitOrderProtocol
+        trailingStopOrder = new TrailingStopOrder(address(limitOrderProtocol));
 
-        // Setup test accounts
-        maker = makeAddr("maker");
+        // Setup test accounts - use addresses that correspond to known private keys
+        uint256 makerPrivateKey = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80; // First anvil private key
+        maker = vm.addr(makerPrivateKey);
         taker = makeAddr("taker");
 
         // Fund accounts with ETH
@@ -87,10 +88,14 @@ contract OrderFillMainnetTest is Test {
         );
     }
 
-    // Mock signature (for testing only; real signature from SDK)
-    function mockSignOrder(bytes32 orderHash) internal pure returns (bytes32 r, bytes32 vs) {
-        r = keccak256(abi.encodePacked("mock_r_", orderHash));
-        vs = keccak256(abi.encodePacked("mock_vs_", orderHash));
+    // Create proper signature using vm.sign with known private key
+    function createValidSignature(address signer, bytes32 orderHash) internal returns (bytes32 r, bytes32 vs) {
+        // Use the same private key that was used to generate the maker address
+        uint256 privateKey = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80; // First anvil private key
+        (uint8 v, bytes32 r_raw, bytes32 s) = vm.sign(privateKey, orderHash);
+        r = r_raw;
+        // For vs format: v is 27 or 28, so we need to subtract 27 and shift left by 255 bits
+        vs = bytes32((uint256(v - 27) << 255) | uint256(s));
     }
 
     // ============ Main Test ============
@@ -110,8 +115,6 @@ contract OrderFillMainnetTest is Test {
         uint256 wbtcAmount = 1e8; // 1 WBTC (8 decimals)
         uint256 usdcAmount = (btcPrice * 1e6) / 1e8; // Convert BTC price to USDC amount (6 decimals)
 
-        bytes32 orderHash = keccak256(abi.encodePacked("BTC_USDC_ORDER", maker, block.timestamp));
-
         IOrderMixin.Order memory order = IOrderMixin.Order({
             salt: uint256(keccak256(abi.encodePacked("mainnet_order", maker, block.timestamp))) & ((1 << 160) - 1),
             maker: Address.wrap(uint256(uint160(maker))),
@@ -120,8 +123,11 @@ contract OrderFillMainnetTest is Test {
             takerAsset: Address.wrap(uint256(uint160(USDC))),
             makingAmount: wbtcAmount,
             takingAmount: usdcAmount,
-            makerTraits: MakerTraits.wrap(1 << 6) // REQUIRE_TAKER_INTERACTION
+            makerTraits: MakerTraits.wrap(1 << 251) // POST_INTERACTION_CALL_FLAG (public order)
         });
+
+        // Get proper order hash from LimitOrderProtocol
+        bytes32 orderHash = limitOrderProtocol.hashOrder(order);
 
         // 2. Configure trailing stop with real oracle
         TrailingStopOrder.TrailingStopConfig memory config = TrailingStopOrder.TrailingStopConfig({
@@ -148,15 +154,15 @@ contract OrderFillMainnetTest is Test {
         bytes memory interaction =
             createTakerInteractionCalldata(order, orderHash, taker, wbtcAmount, usdcAmount, wbtcAmount);
 
-        // 6. Use mock signature (will fail with BadSignature as expected)
-        (bytes32 r, bytes32 vs) = mockSignOrder(orderHash);
+        // 6. Create valid signature using vm.sign
+        (bytes32 r, bytes32 vs) = createValidSignature(maker, orderHash);
         TakerTraits takerTraits = TakerTraits.wrap(1 << 251); // _ARGS_HAS_TARGET flag
 
         vm.prank(taker);
-        vm.expectRevert(); // Expect revert due to signature mismatch
-        limitOrderProtocol.fillOrderArgs(order, r, vs, usdcAmount, takerTraits, interaction);
+        (uint256 makingAmount, uint256 takingAmount, bytes32 filledOrderHash) = 
+            limitOrderProtocol.fillOrderArgs(order, r, vs, usdcAmount, takerTraits, interaction);
 
         console.log("Test completed - using real mainnet BTC price:", btcPrice / 1e8, "USD");
-        console.log("Note: Signature validation working correctly (fails as expected with mock signatures)");
+        console.log("Order filled successfully - Making amount:", makingAmount, "Taking amount:", takingAmount);
     }
 }

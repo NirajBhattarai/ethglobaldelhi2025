@@ -5,6 +5,8 @@ pragma solidity ^0.8.23;
 import {Test} from "forge-std/Test.sol";
 import {console} from "forge-std/console.sol";
 import {TrailingStopOrder} from "../src/extensions/TrailingStopOrder.sol";
+import {LimitOrderProtocol} from "../src/LimitOrderProtocol.sol";
+import {IWETH} from "@1inch/solidity-utils/interfaces/IWETH.sol";
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 
 /**
@@ -57,6 +59,7 @@ contract TrailingStopOrderLocalTest is Test {
     // ============ State Variables ============
 
     TrailingStopOrder public trailingStopOrder;
+    LimitOrderProtocol public limitOrderProtocol;
     MockChainlinkOracle public ethUsdOracle;
     MockChainlinkOracle public btcUsdOracle;
 
@@ -84,8 +87,13 @@ contract TrailingStopOrderLocalTest is Test {
         ethUsdOracle.setPrice(int256(INITIAL_ETH_PRICE));
         btcUsdOracle.setPrice(int256(INITIAL_BTC_PRICE));
 
-        // Deploy TrailingStopOrder contract
-        trailingStopOrder = new TrailingStopOrder();
+        // Deploy LimitOrderProtocol contract
+        // For local tests, we'll use a mock WETH address
+        address mockWETH = makeAddr("mockWETH");
+        limitOrderProtocol = new LimitOrderProtocol(IWETH(mockWETH));
+
+        // Deploy TrailingStopOrder contract with LimitOrderProtocol
+        trailingStopOrder = new TrailingStopOrder(address(limitOrderProtocol));
 
         // Setup test accounts
         maker = makeAddr("maker");

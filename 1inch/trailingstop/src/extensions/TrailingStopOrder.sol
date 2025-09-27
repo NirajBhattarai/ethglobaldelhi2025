@@ -23,6 +23,7 @@ import {AmountGetterBase} from "./AmountGetterBase.sol";
 import {IOrderMixin} from "../interfaces/IOrderMixin.sol";
 import {IPreInteraction} from "../interfaces/IPreInteraction.sol";
 import {ITakerInteraction} from "../interfaces/ITakerInteraction.sol";
+import {LimitOrderProtocol} from "../LimitOrderProtocol.sol";
 
 /**
  * @title TrailingStopOrder
@@ -43,6 +44,7 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
     error SwapExecutionFailed();
     error OnlyKeeper();
     error SlippageExceeded();
+    error InvalidLimitOrderProtocol();
 
     // structs
 
@@ -72,6 +74,7 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
     // storages
 
     mapping(bytes32 => TrailingStopConfig) public trailingStopConfigs;
+    address public limitOrderProtocol;
 
     // events
 
@@ -87,7 +90,12 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
         bytes32 indexed orderHash, address indexed taker, uint256 takerAssetBalance, uint256 stopPrice
     );
 
-    constructor() Ownable(msg.sender) {}
+    constructor(address _limitOrderProtocol) Ownable(msg.sender) {
+        if (_limitOrderProtocol == address(0)) {
+            revert InvalidLimitOrderProtocol();
+        }
+        limitOrderProtocol = _limitOrderProtocol;
+    }
 
     // modifiers
     modifier onlyKeeper(bytes32 orderHash) {
@@ -275,6 +283,12 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
     ) external view override {
         TrailingStopConfig memory config = trailingStopConfigs[orderHash];
 
+        console.log("TrailingStopOrder: preInteraction called");
+        console.log("orderHash:");
+        console.logBytes32(orderHash);
+        console.log("config.configuredAt:");
+        console.logUint(config.configuredAt);
+
         // TODO: Need to decide what to do when no stop triggered
         if (config.configuredAt == 0) {
             revert TrailingStopNotTriggered();
@@ -294,9 +308,19 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
         bytes calldata extraData
     ) external whenNotPaused {
         // Restrict to 1inch Limit Order Protocol
-        // if (msg.sender != LIMIT_ORDER_PROTOCOL) {
-        //     revert("Only 1inch LOP can call");
-        // }
+        if (msg.sender != limitOrderProtocol) {
+            revert("Only 1inch LOP can call");
+        }
+
+        console.log("TrailingStopOrder: takerInteraction called");
+        console.log("orderHash:");
+        console.logBytes32(orderHash);
+        console.log("taker:");
+        console.logAddress(taker);
+        console.log("makingAmount:");
+        console.logUint(makingAmount);
+        console.log("takingAmount:");
+        console.logUint(takingAmount);
 
         TrailingStopConfig memory config = trailingStopConfigs[orderHash];
         if (config.configuredAt == 0) {
