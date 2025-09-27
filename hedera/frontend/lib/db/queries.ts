@@ -33,16 +33,12 @@ import {
   vote,
 } from "./schema";
 
-// Optionally, if not using email/pass login, you can
-// use the Drizzle adapter for Auth.js / NextAuth
-// https://authjs.dev/reference/adapter/drizzle
-
 // biome-ignore lint: Forbidden non-null assertion.
 const client = postgres(process.env.POSTGRES_URL!);
 const db = drizzle(client);
 
 export async function getUserByWalletAddress(
-  walletAddress: string,
+  walletAddress: string
 ): Promise<Array<User>> {
   try {
     return await db
@@ -51,8 +47,8 @@ export async function getUserByWalletAddress(
       .where(eq(user.walletAddress, walletAddress));
   } catch (error) {
     throw new ChatSDKError(
-      'bad_request:database',
-      'Failed to get user by wallet address',
+      "bad_request:database",
+      "Failed to get user by wallet address"
     );
   }
 }
@@ -63,7 +59,7 @@ export async function createWalletUser(walletAddress: string) {
       .insert(user)
       .values({
         walletAddress,
-        authType: 'wallet',
+        authType: "wallet",
       })
       .returning({
         id: user.id,
@@ -72,12 +68,11 @@ export async function createWalletUser(walletAddress: string) {
       });
   } catch (error) {
     throw new ChatSDKError(
-      'bad_request:database',
-      'Failed to create wallet user',
+      "bad_request:database",
+      "Failed to create wallet user"
     );
   }
 }
-
 
 export async function saveChat({
   id,

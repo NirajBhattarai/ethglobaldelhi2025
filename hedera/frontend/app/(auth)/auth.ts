@@ -26,7 +26,7 @@ declare module "next-auth/jwt" {
   interface JWT extends DefaultJWT {
     id: string;
     type: UserType;
-     walletAddress?: string;
+    walletAddress?: string;
   }
 }
 
@@ -38,8 +38,8 @@ export const {
 } = NextAuth({
   ...authConfig,
   providers: [
-     Credentials({
-      id: 'wallet',
+    Credentials({
+      id: "wallet",
       credentials: {},
       async authorize({ address, signature, message }: any) {
         if (!address || !signature || !message) {
@@ -59,7 +59,7 @@ export const {
         return {
           id: user.id,
           walletAddress: user.walletAddress,
-          type: 'wallet',
+          type: "wallet",
         };
       },
     }),
