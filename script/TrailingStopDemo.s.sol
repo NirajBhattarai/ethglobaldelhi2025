@@ -187,7 +187,7 @@ contract TrailingStopDemoScript is Script {
 
     // Demo parameters
     uint256 constant INITIAL_ETH_PRICE = 2000e8; // $2000
-    uint256 constant TRAILING_DISTANCE = 50e8; // $50 trailing distance
+    uint256 constant TRAILING_DISTANCE = 500; // 5% trailing distance in basis points
     uint256 constant ORDER_AMOUNT = 1e18; // 1 ETH
     uint256 constant USDC_AMOUNT = 2000e6; // 2000 USDC
 
@@ -287,9 +287,9 @@ contract TrailingStopDemoScript is Script {
         TrailingStopOrder.TrailingStopConfig memory config = TrailingStopOrder.TrailingStopConfig({
             makerAssetOracle: ethUsdAggregator,
             takerAssetOracle: ethUsdAggregator,
-            initialStopPrice: INITIAL_ETH_PRICE - TRAILING_DISTANCE, // $1950
+            initialStopPrice: INITIAL_ETH_PRICE - (INITIAL_ETH_PRICE * TRAILING_DISTANCE / 10000), // $1900 (5% below $2000)
             trailingDistance: TRAILING_DISTANCE,
-            currentStopPrice: INITIAL_ETH_PRICE - TRAILING_DISTANCE,
+            currentStopPrice: INITIAL_ETH_PRICE - (INITIAL_ETH_PRICE * TRAILING_DISTANCE / 10000),
             configuredAt: block.timestamp,
             lastUpdateAt: block.timestamp,
             updateFrequency: 60, // 1 minute
@@ -314,7 +314,7 @@ contract TrailingStopDemoScript is Script {
         console.log("Sell order placed!");
         console.log("Order hash:", vm.toString(orderHash));
         console.log("Initial stop price: $", config.initialStopPrice / 1e8);
-        console.log("Trailing distance: $", TRAILING_DISTANCE / 1e8);
+        console.log("Trailing distance: ", TRAILING_DISTANCE / 100, "%");
 
         // Simulate price movements
         _simulatePriceMovements(orderHash, false);
@@ -353,9 +353,9 @@ contract TrailingStopDemoScript is Script {
         TrailingStopOrder.TrailingStopConfig memory config = TrailingStopOrder.TrailingStopConfig({
             makerAssetOracle: ethUsdAggregator,
             takerAssetOracle: ethUsdAggregator,
-            initialStopPrice: INITIAL_ETH_PRICE + TRAILING_DISTANCE, // $2050
+            initialStopPrice: INITIAL_ETH_PRICE + (INITIAL_ETH_PRICE * TRAILING_DISTANCE / 10000), // $2100 (5% above $2000)
             trailingDistance: TRAILING_DISTANCE,
-            currentStopPrice: INITIAL_ETH_PRICE + TRAILING_DISTANCE,
+            currentStopPrice: INITIAL_ETH_PRICE + (INITIAL_ETH_PRICE * TRAILING_DISTANCE / 10000),
             configuredAt: block.timestamp,
             lastUpdateAt: block.timestamp,
             updateFrequency: 60, // 1 minute
@@ -380,7 +380,7 @@ contract TrailingStopDemoScript is Script {
         console.log("Buy order placed!");
         console.log("Order hash:", vm.toString(orderHash));
         console.log("Initial stop price: $", config.initialStopPrice / 1e8);
-        console.log("Trailing distance: $", TRAILING_DISTANCE / 1e8);
+        console.log("Trailing distance: ", TRAILING_DISTANCE / 100, "%");
 
         // Simulate price movements
         _simulatePriceMovements(orderHash, true);
@@ -455,9 +455,9 @@ contract TrailingStopDemoScript is Script {
         TrailingStopOrder.TrailingStopConfig memory config = TrailingStopOrder.TrailingStopConfig({
             makerAssetOracle: ethUsdAggregator,
             takerAssetOracle: ethUsdAggregator,
-            initialStopPrice: INITIAL_ETH_PRICE - TRAILING_DISTANCE,
+            initialStopPrice: INITIAL_ETH_PRICE - (INITIAL_ETH_PRICE * TRAILING_DISTANCE / 10000),
             trailingDistance: TRAILING_DISTANCE,
-            currentStopPrice: INITIAL_ETH_PRICE - TRAILING_DISTANCE,
+            currentStopPrice: INITIAL_ETH_PRICE - (INITIAL_ETH_PRICE * TRAILING_DISTANCE / 10000),
             configuredAt: block.timestamp,
             lastUpdateAt: block.timestamp,
             updateFrequency: 60,
@@ -535,9 +535,9 @@ contract TrailingStopDemoScript is Script {
             TrailingStopOrder.TrailingStopConfig memory config = TrailingStopOrder.TrailingStopConfig({
                 makerAssetOracle: ethUsdAggregator,
                 takerAssetOracle: ethUsdAggregator,
-                initialStopPrice: INITIAL_ETH_PRICE - TRAILING_DISTANCE,
+                initialStopPrice: INITIAL_ETH_PRICE - (INITIAL_ETH_PRICE * TRAILING_DISTANCE / 10000),
                 trailingDistance: TRAILING_DISTANCE,
-                currentStopPrice: INITIAL_ETH_PRICE - TRAILING_DISTANCE,
+                currentStopPrice: INITIAL_ETH_PRICE - (INITIAL_ETH_PRICE * TRAILING_DISTANCE / 10000),
                 configuredAt: block.timestamp,
                 lastUpdateAt: block.timestamp,
                 updateFrequency: 60,
