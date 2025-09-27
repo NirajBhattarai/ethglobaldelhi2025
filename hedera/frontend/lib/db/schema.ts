@@ -15,12 +15,10 @@ import type { AppUsage } from "../usage";
 
 export const user = pgTable("User", {
   id: uuid("id").primaryKey().notNull().defaultRandom(),
-  email: varchar("email", { length: 64 }),
-  password: varchar("password", { length: 64 }),
-  walletAddress: varchar('walletAddress', { length: 42 }),
-  authType: varchar('authType', { enum: ['email', 'wallet'] })
+  walletAddress: varchar('walletAddress', { length: 42 }).notNull().unique(),
+  authType: varchar('authType', { enum: ['wallet'] })
     .notNull()
-    .default('email'),
+    .default('wallet'),
 });
 
 export type User = InferSelectModel<typeof user>;

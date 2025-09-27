@@ -1,13 +1,10 @@
 import { authenticateWalletUser } from "@/lib/auth/wallet-auth";
-import { DUMMY_PASSWORD } from "@/lib/constants";
-import { createGuestUser, getUser, getUserByWalletAddress } from "@/lib/db/queries";
-import { compare } from "bcrypt-ts";
 import NextAuth, { type DefaultSession } from "next-auth";
 import type { DefaultJWT } from "next-auth/jwt";
 import Credentials from "next-auth/providers/credentials";
 import { authConfig } from "./auth.config";
 
-export type UserType = "guest" | "regular" | "wallet";
+export type UserType = "wallet";
 
 declare module "next-auth" {
   interface Session extends DefaultSession {
@@ -20,7 +17,6 @@ declare module "next-auth" {
   // biome-ignore lint/nursery/useConsistentTypeDefinitions: "Required"
   interface User {
     id?: string;
-    email?: string | null;
     walletAddress?: string | null;
     type: UserType;
   }
@@ -65,14 +61,6 @@ export const {
           walletAddress: user.walletAddress,
           type: 'wallet',
         };
-      },
-    }),
-    Credentials({
-      id: "guest",
-      credentials: {},
-      async authorize() {
-        const [guestUser] = await createGuestUser();
-        return { ...guestUser, type: "guest" };
       },
     }),
   ],
