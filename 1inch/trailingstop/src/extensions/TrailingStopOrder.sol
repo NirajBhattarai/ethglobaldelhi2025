@@ -308,8 +308,26 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
             );
         }
 
-        // TODO: implement the logic to get the making amount
-        return 0;
+        // Get current price from oracle
+        uint256 currentPrice = _getCurrentPrice(config.makerAssetOracle);
+        
+        // Check if trailing stop is triggered
+        bool isTriggered = false;
+        if (config.orderType == OrderType.SELL) {
+            // For sell orders: trigger when current price <= stop price
+            isTriggered = currentPrice <= config.currentStopPrice;
+        } else {
+            // For buy orders: trigger when current price >= stop price
+            isTriggered = currentPrice >= config.currentStopPrice;
+        }
+
+        // If not triggered, return 0 (order should not execute)
+        if (!isTriggered) {
+            return 0;
+        }
+
+        // Calculate making amount based on current price and decimal handling
+        return _calculateMakingAmountWithDecimals(takingAmount, currentPrice, config);
     }
 
     function _getTakingAmount(
@@ -322,14 +340,33 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
         bytes calldata extraData
     ) internal view override returns (uint256) {
         TrailingStopConfig memory config = trailingStopConfigs[orderHash];
+        
         if (config.configuredAt == 0) {
             return super._getTakingAmount(
                 order, extension, orderHash, taker, makingAmount, remainingMakingAmount, extraData
             );
         }
 
-        // TODO: implement the logic to get the taking amount
-        return 0;
+        // Get current price from oracle
+        uint256 currentPrice = _getCurrentPrice(config.makerAssetOracle);
+        
+        // Check if trailing stop is triggered
+        bool isTriggered = false;
+        if (config.orderType == OrderType.SELL) {
+            // For sell orders: trigger when current price <= stop price
+            isTriggered = currentPrice <= config.currentStopPrice;
+        } else {
+            // For buy orders: trigger when current price >= stop price
+            isTriggered = currentPrice >= config.currentStopPrice;
+        }
+
+        // If not triggered, return max value (order should not execute)
+        if (!isTriggered) {
+            return type(uint256).max;
+        }
+
+        // Calculate taking amount based on current price and decimal handling
+        return _calculateTakingAmountWithDecimals(makingAmount, currentPrice, config);
     }
 
     function preInteraction(
@@ -455,5 +492,73 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
 
         // Emit event
         emit TrailingStopTriggered(orderHash, taker, takingAmount, config.currentStopPrice);
+    }
+
+    /**
+     * @notice Calculates making amount with proper decimal handling
+     * @dev Converts taking amount to making amount based on current price
+     * @param takingAmount The amount being taken (in taker asset decimals)
+     * @param currentPrice The current market price (18 decimals)
+     * @param config The trailing stop configuration
+     * @return makingAmount The calculated making amount (in maker asset decimals)
+     */
+    function _calculateMakingAmountWithDecimals(
+        uint256 takingAmount,
+        uint256 currentPrice,
+        TrailingStopConfig memory config
+    ) internal pure returns (uint256) {
+        // Normalize taking amount to 18 decimals
+        uint256 normalizedTakingAmount = takingAmount;
+        if (config.takerAssetDecimals < 18) {
+            normalizedTakingAmount = takingAmount * (10 ** (18 - config.takerAssetDecimals));
+        } else if (config.takerAssetDecimals > 18) {
+            normalizedTakingAmount = takingAmount / (10 ** (config.takerAssetDecimals - 18));
+        }
+
+        // Calculate making amount in 18 decimals: takingAmount / currentPrice
+        uint256 makingAmount18 = (normalizedTakingAmount * 1e18) / currentPrice;
+
+        // Convert back to maker asset decimals
+        if (config.makerAssetDecimals < 18) {
+            return makingAmount18 / (10 ** (18 - config.makerAssetDecimals));
+        } else if (config.makerAssetDecimals > 18) {
+            return makingAmount18 * (10 ** (config.makerAssetDecimals - 18));
+        }
+
+        return makingAmount18;
+    }
+
+    /**
+     * @notice Calculates taking amount with proper decimal handling
+     * @dev Converts making amount to taking amount based on current price
+     * @param makingAmount The amount being made (in maker asset decimals)
+     * @param currentPrice The current market price (18 decimals)
+     * @param config The trailing stop configuration
+     * @return takingAmount The calculated taking amount (in taker asset decimals)
+     */
+    function _calculateTakingAmountWithDecimals(
+        uint256 makingAmount,
+        uint256 currentPrice,
+        TrailingStopConfig memory config
+    ) internal pure returns (uint256) {
+        // Normalize making amount to 18 decimals
+        uint256 normalizedMakingAmount = makingAmount;
+        if (config.makerAssetDecimals < 18) {
+            normalizedMakingAmount = makingAmount * (10 ** (18 - config.makerAssetDecimals));
+        } else if (config.makerAssetDecimals > 18) {
+            normalizedMakingAmount = makingAmount / (10 ** (config.makerAssetDecimals - 18));
+        }
+
+        // Calculate taking amount in 18 decimals: makingAmount * currentPrice
+        uint256 takingAmount18 = (normalizedMakingAmount * currentPrice) / 1e18;
+
+        // Convert back to taker asset decimals
+        if (config.takerAssetDecimals < 18) {
+            return takingAmount18 / (10 ** (18 - config.takerAssetDecimals));
+        } else if (config.takerAssetDecimals > 18) {
+            return takingAmount18 * (10 ** (config.takerAssetDecimals - 18));
+        }
+
+        return takingAmount18;
     }
 }

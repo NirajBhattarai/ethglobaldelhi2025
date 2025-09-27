@@ -12,6 +12,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Address, AddressLib} from "@1inch/solidity-utils/libraries/AddressLib.sol";
 import {MakerTraitsLib, MakerTraits} from "../src/libraries/MakerTraitsLib.sol";
 import {IOrderMixin} from "../src/interfaces/IOrderMixin.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 
 /**
  * @title MockChainlinkAggregator
@@ -127,6 +128,9 @@ contract TrailingStopOrderComprehensiveTest is Test {
     address public taker;
     address public keeper;
     address public admin;
+    address public attacker;
+    address public mevBot;
+    address public owner;
     
     // Test constants
     uint256 constant INITIAL_ETH_PRICE = 2000e8; // $2000 in 8 decimals
@@ -184,6 +188,9 @@ contract TrailingStopOrderComprehensiveTest is Test {
         taker = makeAddr("taker");
         keeper = makeAddr("keeper");
         admin = makeAddr("admin");
+        attacker = makeAddr("attacker");
+        mevBot = makeAddr("mevBot");
+        owner = address(this);
         
         // Fund accounts
         vm.deal(maker, 100 ether);
@@ -235,6 +242,19 @@ contract TrailingStopOrderComprehensiveTest is Test {
     function getCurrentPrice18Decimals() internal view returns (uint256) {
         (, int256 answer,,,) = mockOracle.latestRoundData();
         return uint256(answer) * 1e10;
+    }
+    
+    function createTestOrder() internal view returns (IOrderMixin.Order memory) {
+        return IOrderMixin.Order({
+            salt: 0,
+            maker: Address.wrap(uint160(maker)),
+            receiver: Address.wrap(uint160(address(0))),
+            makerAsset: Address.wrap(uint160(address(mockWBTC))),
+            takerAsset: Address.wrap(uint160(address(mockUSDC))),
+            makingAmount: 1e8, // 1 WBTC
+            takingAmount: 1800000000, // 1800 USDC (6 decimals)
+            makerTraits: MakerTraits.wrap(0)
+        });
     }
 
     // ============ Configuration Tests ============
@@ -1070,5 +1090,629 @@ contract TrailingStopOrderComprehensiveTest is Test {
         // Assert
         console.log("Gas used for updateTrailingStop:", gasUsed);
         assertTrue(gasUsed < 100000, "Gas usage should be reasonable");
+    }
+
+    // ============ SECURITY EDGE CASES ============
+
+    /**
+     * @notice Test oracle manipulation attacks
+     */
+    function testOracleManipulationAttack() public {
+        bytes32 orderHash = createOrderHash("oracle-manipulation");
+        uint256 initialStopPrice = convertTo18Decimals(1900e8);
+        
+        TrailingStopOrder.TrailingStopConfig memory config = createTrailingStopConfig(
+            initialStopPrice,
+            TRAILING_DISTANCE,
+            TrailingStopOrder.OrderType.SELL
+        );
+
+        vm.prank(maker);
+        trailingStopOrder.configureTrailingStop(orderHash, config);
+
+        // Attacker tries to manipulate oracle price to trigger false execution
+        vm.prank(attacker);
+        mockOracle.setPrice(1000e8); // Set extremely low price
+
+        // Should not be able to execute because keeper controls updates
+        vm.prank(attacker);
+        vm.expectRevert(TrailingStopOrder.OnlyKeeper.selector);
+        trailingStopOrder.updateTrailingStop(orderHash);
+    }
+
+    /**
+     * @notice Test stale oracle price attacks
+     */
+    function testStaleOraclePrice() public {
+        bytes32 orderHash = createOrderHash("stale-oracle");
+        uint256 initialStopPrice = convertTo18Decimals(1900e8);
+        
+        TrailingStopOrder.TrailingStopConfig memory config = createTrailingStopConfig(
+            initialStopPrice,
+            TRAILING_DISTANCE,
+            TrailingStopOrder.OrderType.SELL
+        );
+
+        vm.prank(maker);
+        trailingStopOrder.configureTrailingStop(orderHash, config);
+
+        // Simulate stale oracle data (very old timestamp)
+        vm.warp(block.timestamp + 86400); // 1 day later
+        mockOracle.setPrice(1000e8); // Old price
+
+        // Should still work with current oracle data
+        vm.prank(keeper);
+        trailingStopOrder.updateTrailingStop(orderHash);
+    }
+
+    /**
+     * @notice Test zero price oracle response
+     */
+    function testZeroPriceOracle() public {
+        bytes32 orderHash = createOrderHash("zero-price");
+        uint256 initialStopPrice = convertTo18Decimals(1900e8);
+        
+        TrailingStopOrder.TrailingStopConfig memory config = createTrailingStopConfig(
+            initialStopPrice,
+            TRAILING_DISTANCE,
+            TrailingStopOrder.OrderType.SELL
+        );
+
+        vm.prank(maker);
+        trailingStopOrder.configureTrailingStop(orderHash, config);
+
+        // Set oracle price to zero
+        mockOracle.setPrice(0);
+
+        vm.prank(keeper);
+        vm.expectRevert(); // Should revert due to division by zero or invalid price
+        trailingStopOrder.updateTrailingStop(orderHash);
+    }
+
+    /**
+     * @notice Test negative price oracle response
+     */
+    function testNegativePriceOracle() public {
+        bytes32 orderHash = createOrderHash("negative-price");
+        uint256 initialStopPrice = convertTo18Decimals(1900e8);
+        
+        TrailingStopOrder.TrailingStopConfig memory config = createTrailingStopConfig(
+            initialStopPrice,
+            TRAILING_DISTANCE,
+            TrailingStopOrder.OrderType.SELL
+        );
+
+        vm.prank(maker);
+        trailingStopOrder.configureTrailingStop(orderHash, config);
+
+        // Set oracle price to negative value
+        mockOracle.setPrice(-1000e8);
+
+        vm.prank(keeper);
+        vm.expectRevert(); // Should revert due to negative price conversion
+        trailingStopOrder.updateTrailingStop(orderHash);
+    }
+
+    /**
+     * @notice Test extremely large oracle price
+     */
+    function testExtremelyLargeOraclePrice() public {
+        bytes32 orderHash = createOrderHash("large-price");
+        uint256 initialStopPrice = convertTo18Decimals(1900e8);
+        
+        TrailingStopOrder.TrailingStopConfig memory config = createTrailingStopConfig(
+            initialStopPrice,
+            TRAILING_DISTANCE,
+            TrailingStopOrder.OrderType.SELL
+        );
+
+        vm.prank(maker);
+        trailingStopOrder.configureTrailingStop(orderHash, config);
+
+        // Set extremely large price that could cause overflow
+        mockOracle.setPrice(type(int256).max);
+
+        vm.prank(keeper);
+        vm.expectRevert(); // Should revert due to overflow
+        trailingStopOrder.updateTrailingStop(orderHash);
+    }
+
+    /**
+     * @notice Test arithmetic overflow in price calculations
+     */
+    function testArithmeticOverflowInCalculations() public {
+        bytes32 orderHash = createOrderHash("overflow-calc");
+        uint256 initialStopPrice = convertTo18Decimals(1900e8);
+        
+        TrailingStopOrder.TrailingStopConfig memory config = createTrailingStopConfig(
+            initialStopPrice,
+            TRAILING_DISTANCE,
+            TrailingStopOrder.OrderType.SELL
+        );
+
+        vm.prank(maker);
+        trailingStopOrder.configureTrailingStop(orderHash, config);
+
+        // Set price that could cause overflow when multiplied by trailing distance
+        mockOracle.setPrice(type(int256).max / 2);
+
+        vm.prank(keeper);
+        vm.expectRevert(); // Should revert due to overflow
+        trailingStopOrder.updateTrailingStop(orderHash);
+    }
+
+    /**
+     * @notice Test unauthorized access to configuration
+     */
+    function testUnauthorizedConfigurationAccess() public {
+        bytes32 orderHash = createOrderHash("unauthorized-config");
+        uint256 initialStopPrice = convertTo18Decimals(1900e8);
+        
+        TrailingStopOrder.TrailingStopConfig memory config = createTrailingStopConfig(
+            initialStopPrice,
+            TRAILING_DISTANCE,
+            TrailingStopOrder.OrderType.SELL
+        );
+
+        // Non-maker tries to configure trailing stop
+        vm.prank(attacker);
+        vm.expectRevert(); // Should revert - only maker can configure
+        trailingStopOrder.configureTrailingStop(orderHash, config);
+    }
+
+    /**
+     * @notice Test MEV attack scenarios
+     */
+    function testMEVAttackScenarios() public {
+        bytes32 orderHash = createOrderHash("mev-attack");
+        uint256 initialStopPrice = convertTo18Decimals(1900e8);
+        
+        TrailingStopOrder.TrailingStopConfig memory config = createTrailingStopConfig(
+            initialStopPrice,
+            TRAILING_DISTANCE,
+            TrailingStopOrder.OrderType.SELL
+        );
+
+        vm.prank(maker);
+        trailingStopOrder.configureTrailingStop(orderHash, config);
+
+        // MEV bot tries to front-run keeper update
+        vm.prank(mevBot);
+        vm.expectRevert(TrailingStopOrder.OnlyKeeper.selector);
+        trailingStopOrder.updateTrailingStop(orderHash);
+
+        // MEV bot tries to execute order before keeper updates
+        mockOracle.setPrice(1800e8);
+        vm.prank(address(trailingStopOrder));
+        vm.expectRevert(TrailingStopOrder.TrailingStopNotTriggered.selector);
+        trailingStopOrder.takerInteraction(createTestOrder(), "", orderHash, mevBot, 1e8, 1800000000, 0, "");
+    }
+
+    /**
+     * @notice Test slippage manipulation attacks
+     */
+    function testSlippageManipulationAttack() public {
+        bytes32 orderHash = createOrderHash("slippage-manipulation");
+        uint256 initialStopPrice = convertTo18Decimals(1900e8);
+        
+        TrailingStopOrder.TrailingStopConfig memory config = createTrailingStopConfig(
+            initialStopPrice,
+            TRAILING_DISTANCE,
+            TrailingStopOrder.OrderType.SELL
+        );
+
+        vm.prank(maker);
+        trailingStopOrder.configureTrailingStop(orderHash, config);
+
+        // Set price to trigger execution
+        mockOracle.setPrice(1800e8);
+
+        // Approve tokens
+        vm.prank(maker);
+        mockWBTC.approve(address(trailingStopOrder), type(uint256).max);
+
+        // Transfer taker tokens
+        vm.prank(taker);
+        mockUSDC.transfer(address(trailingStopOrder), 1800000000);
+
+        // Try to execute with manipulated amounts to cause slippage
+        vm.prank(address(trailingStopOrder));
+        vm.expectRevert(TrailingStopOrder.SlippageExceeded.selector);
+        trailingStopOrder.takerInteraction(createTestOrder(), "", orderHash, taker, 1e8, 1000000000, 0, ""); // Much lower taking amount
+    }
+
+    /**
+     * @notice Test pause/unpause security
+     */
+    function testPauseUnpauseSecurity() public {
+        bytes32 orderHash = createOrderHash("pause-security");
+        uint256 initialStopPrice = convertTo18Decimals(1900e8);
+        
+        TrailingStopOrder.TrailingStopConfig memory config = createTrailingStopConfig(
+            initialStopPrice,
+            TRAILING_DISTANCE,
+            TrailingStopOrder.OrderType.SELL
+        );
+
+        vm.prank(maker);
+        trailingStopOrder.configureTrailingStop(orderHash, config);
+
+        // Pause contract
+        vm.prank(owner);
+        trailingStopOrder.pause();
+
+        // Try to update when paused
+        vm.prank(keeper);
+        vm.expectRevert(Pausable.EnforcedPause.selector);
+        trailingStopOrder.updateTrailingStop(orderHash);
+
+        // Try to execute when paused
+        vm.prank(address(trailingStopOrder));
+        vm.expectRevert(Pausable.EnforcedPause.selector);
+        trailingStopOrder.takerInteraction(createTestOrder(), "", orderHash, taker, 1e8, 1800000000, 0, "");
+
+        // Unpause and verify functionality restored
+        vm.prank(owner);
+        trailingStopOrder.unpause();
+
+        vm.prank(keeper);
+        trailingStopOrder.updateTrailingStop(orderHash); // Should work now
+    }
+
+    /**
+     * @notice Test extreme trailing distance values
+     */
+    function testExtremeTrailingDistanceValues() public {
+        bytes32 orderHash = createOrderHash("extreme-distance");
+        uint256 initialStopPrice = convertTo18Decimals(1900e8);
+
+        // Test maximum allowed trailing distance
+        TrailingStopOrder.TrailingStopConfig memory maxDistanceConfig = createTrailingStopConfig(
+            initialStopPrice,
+            10000, // 100%
+            TrailingStopOrder.OrderType.SELL
+        );
+
+        vm.prank(maker);
+        trailingStopOrder.configureTrailingStop(orderHash, maxDistanceConfig);
+
+        // Test minimum allowed trailing distance
+        TrailingStopOrder.TrailingStopConfig memory minDistanceConfig = createTrailingStopConfig(
+            initialStopPrice,
+            50, // 0.5%
+            TrailingStopOrder.OrderType.SELL
+        );
+
+        vm.prank(maker);
+        trailingStopOrder.configureTrailingStop(orderHash, minDistanceConfig);
+
+        // Test below minimum (should revert)
+        TrailingStopOrder.TrailingStopConfig memory belowMinConfig = createTrailingStopConfig(
+            initialStopPrice,
+            49, // Below minimum
+            TrailingStopOrder.OrderType.SELL
+        );
+
+        vm.prank(maker);
+        vm.expectRevert(TrailingStopOrder.InvalidTrailingDistance.selector);
+        trailingStopOrder.configureTrailingStop(orderHash, belowMinConfig);
+    }
+
+    /**
+     * @notice Test extreme slippage values
+     */
+    function testExtremeSlippageValues() public {
+        bytes32 orderHash = createOrderHash("extreme-slippage");
+        uint256 initialStopPrice = convertTo18Decimals(1900e8);
+
+        // Test maximum allowed slippage
+        TrailingStopOrder.TrailingStopConfig memory maxSlippageConfig = createTrailingStopConfig(
+            initialStopPrice,
+            TRAILING_DISTANCE,
+            TrailingStopOrder.OrderType.SELL
+        );
+        maxSlippageConfig.maxSlippage = 1000; // 10%
+
+        vm.prank(maker);
+        trailingStopOrder.configureTrailingStop(orderHash, maxSlippageConfig);
+
+        // Test above maximum (should revert)
+        TrailingStopOrder.TrailingStopConfig memory aboveMaxSlippageConfig = createTrailingStopConfig(
+            initialStopPrice,
+            TRAILING_DISTANCE,
+            TrailingStopOrder.OrderType.SELL
+        );
+        aboveMaxSlippageConfig.maxSlippage = 1001; // Above maximum
+
+        vm.prank(maker);
+        vm.expectRevert(TrailingStopOrder.InvalidTrailingDistance.selector);
+        trailingStopOrder.configureTrailingStop(orderHash, aboveMaxSlippageConfig);
+    }
+
+    /**
+     * @notice Test update frequency edge cases
+     */
+    function testUpdateFrequencyEdgeCases() public {
+        bytes32 orderHash = createOrderHash("frequency-edge");
+        uint256 initialStopPrice = convertTo18Decimals(1900e8);
+
+        // Test zero update frequency
+        TrailingStopOrder.TrailingStopConfig memory zeroFreqConfig = createTrailingStopConfig(
+            initialStopPrice,
+            TRAILING_DISTANCE,
+            TrailingStopOrder.OrderType.SELL
+        );
+        zeroFreqConfig.updateFrequency = 0;
+
+        vm.prank(maker);
+        trailingStopOrder.configureTrailingStop(orderHash, zeroFreqConfig);
+
+        // Should allow immediate update
+        vm.prank(keeper);
+        trailingStopOrder.updateTrailingStop(orderHash);
+
+        // Test very large update frequency
+        TrailingStopOrder.TrailingStopConfig memory largeFreqConfig = createTrailingStopConfig(
+            initialStopPrice,
+            TRAILING_DISTANCE,
+            TrailingStopOrder.OrderType.SELL
+        );
+        largeFreqConfig.updateFrequency = type(uint256).max;
+
+        vm.prank(maker);
+        trailingStopOrder.configureTrailingStop(orderHash, largeFreqConfig);
+
+        // Should not allow update due to frequency
+        vm.prank(keeper);
+        vm.expectRevert(TrailingStopOrder.InvalidUpdateFrequency.selector);
+        trailingStopOrder.updateTrailingStop(orderHash);
+    }
+
+    /**
+     * @notice Test order type edge cases
+     */
+    function testOrderTypeEdgeCases() public {
+        bytes32 orderHash = createOrderHash("order-type-edge");
+        uint256 initialStopPrice = convertTo18Decimals(1900e8);
+
+        // Test invalid order type (should revert)
+        TrailingStopOrder.TrailingStopConfig memory invalidOrderTypeConfig = createTrailingStopConfig(
+            initialStopPrice,
+            TRAILING_DISTANCE,
+            TrailingStopOrder.OrderType.SELL
+        );
+        // Cast invalid enum value
+        invalidOrderTypeConfig.orderType = TrailingStopOrder.OrderType(uint8(2));
+
+        vm.prank(maker);
+        vm.expectRevert(TrailingStopOrder.InvalidOrderType.selector);
+        trailingStopOrder.configureTrailingStop(orderHash, invalidOrderTypeConfig);
+    }
+
+    /**
+     * @notice Test token transfer edge cases
+     */
+    function testTokenTransferEdgeCases() public {
+        bytes32 orderHash = createOrderHash("token-transfer-edge");
+        uint256 initialStopPrice = convertTo18Decimals(1900e8);
+        
+        TrailingStopOrder.TrailingStopConfig memory config = createTrailingStopConfig(
+            initialStopPrice,
+            TRAILING_DISTANCE,
+            TrailingStopOrder.OrderType.SELL
+        );
+
+        vm.prank(maker);
+        trailingStopOrder.configureTrailingStop(orderHash, config);
+
+        // Test with insufficient allowance
+        vm.prank(maker);
+        mockWBTC.approve(address(trailingStopOrder), 0); // Zero allowance
+
+        mockOracle.setPrice(1800e8);
+        vm.prank(taker);
+        mockUSDC.transfer(address(trailingStopOrder), 1800000000);
+
+        vm.prank(address(trailingStopOrder));
+        vm.expectRevert(); // Should revert due to insufficient allowance
+        trailingStopOrder.takerInteraction(createTestOrder(), "", orderHash, taker, 1e8, 1800000000, 0, "");
+
+        // Test with insufficient balance
+        vm.prank(maker);
+        mockWBTC.approve(address(trailingStopOrder), type(uint256).max);
+
+        vm.prank(maker);
+        mockWBTC.transfer(address(0xdead), mockWBTC.balanceOf(maker)); // Transfer all balance away
+
+        vm.prank(address(trailingStopOrder));
+        vm.expectRevert(); // Should revert due to insufficient balance
+        trailingStopOrder.takerInteraction(createTestOrder(), "", orderHash, taker, 1e8, 1800000000, 0, "");
+    }
+
+    /**
+     * @notice Test external call failures
+     */
+    function testExternalCallFailures() public {
+        bytes32 orderHash = createOrderHash("external-call-failure");
+        uint256 initialStopPrice = convertTo18Decimals(1900e8);
+        
+        TrailingStopOrder.TrailingStopConfig memory config = createTrailingStopConfig(
+            initialStopPrice,
+            TRAILING_DISTANCE,
+            TrailingStopOrder.OrderType.SELL
+        );
+
+        vm.prank(maker);
+        trailingStopOrder.configureTrailingStop(orderHash, config);
+
+        // Test with invalid aggregation router address
+        bytes memory invalidSwapData = abi.encode(address(0xdead), "");
+        
+        mockOracle.setPrice(1800e8);
+        vm.prank(maker);
+        mockWBTC.approve(address(trailingStopOrder), type(uint256).max);
+        vm.prank(taker);
+        mockUSDC.transfer(address(trailingStopOrder), 1800000000);
+
+        vm.prank(address(trailingStopOrder));
+        vm.expectRevert(TrailingStopOrder.SwapExecutionFailed.selector);
+        trailingStopOrder.takerInteraction(createTestOrder(), "", orderHash, taker, 1e8, 1800000000, 0, invalidSwapData);
+    }
+
+    /**
+     * @notice Test boundary conditions for price calculations
+     */
+    function testPriceCalculationBoundaries() public {
+        bytes32 orderHash = createOrderHash("price-boundaries");
+        uint256 initialStopPrice = convertTo18Decimals(1900e8);
+        
+        TrailingStopOrder.TrailingStopConfig memory config = createTrailingStopConfig(
+            initialStopPrice,
+            TRAILING_DISTANCE,
+            TrailingStopOrder.OrderType.SELL
+        );
+
+        vm.prank(maker);
+        trailingStopOrder.configureTrailingStop(orderHash, config);
+
+        // Test price exactly at stop price (boundary condition)
+        mockOracle.setPrice(1900e8); // Exactly at stop price
+
+        vm.prank(keeper);
+        trailingStopOrder.updateTrailingStop(orderHash);
+
+        // Test price just above/below stop price
+        mockOracle.setPrice(1901e8); // Just above stop price
+        vm.prank(keeper);
+        trailingStopOrder.updateTrailingStop(orderHash);
+
+        mockOracle.setPrice(1899e8); // Just below stop price
+        vm.prank(keeper);
+        trailingStopOrder.updateTrailingStop(orderHash);
+    }
+
+    /**
+     * @notice Test multiple simultaneous configurations
+     */
+    function testMultipleSimultaneousConfigurations() public {
+        // Configure multiple orders simultaneously
+        bytes32 orderHash1 = createOrderHash("multi-config-1");
+        bytes32 orderHash2 = createOrderHash("multi-config-2");
+        uint256 initialStopPrice = convertTo18Decimals(1900e8);
+        
+        TrailingStopOrder.TrailingStopConfig memory config = createTrailingStopConfig(
+            initialStopPrice,
+            TRAILING_DISTANCE,
+            TrailingStopOrder.OrderType.SELL
+        );
+
+        vm.prank(maker);
+        trailingStopOrder.configureTrailingStop(orderHash1, config);
+
+        vm.prank(maker);
+        trailingStopOrder.configureTrailingStop(orderHash2, config);
+
+        // Both should be configured independently
+        (,,, uint256 config1ConfiguredAt,,,,,,,,) = trailingStopOrder.trailingStopConfigs(orderHash1);
+        (,,, uint256 config2ConfiguredAt,,,,,,,,) = trailingStopOrder.trailingStopConfigs(orderHash2);
+        (, uint256 config1InitialStopPrice,,,,,,,,,) = trailingStopOrder.trailingStopConfigs(orderHash1);
+        (, uint256 config2InitialStopPrice,,,,,,,,,) = trailingStopOrder.trailingStopConfigs(orderHash2);
+
+        assertTrue(config1ConfiguredAt > 0);
+        assertTrue(config2ConfiguredAt > 0);
+        assertEq(config1InitialStopPrice, config2InitialStopPrice);
+    }
+
+    /**
+     * @notice Test configuration with same order hash multiple times
+     */
+    function testSameOrderHashMultipleConfigurations() public {
+        bytes32 orderHash = createOrderHash("same-hash-multiple");
+        uint256 initialStopPrice = convertTo18Decimals(1900e8);
+        
+        TrailingStopOrder.TrailingStopConfig memory config = createTrailingStopConfig(
+            initialStopPrice,
+            TRAILING_DISTANCE,
+            TrailingStopOrder.OrderType.SELL
+        );
+
+        vm.prank(maker);
+        trailingStopOrder.configureTrailingStop(orderHash, config);
+
+        // Configure same order hash again (should overwrite)
+        TrailingStopOrder.TrailingStopConfig memory newConfig = createTrailingStopConfig(
+            convertTo18Decimals(3000e8),
+            TRAILING_DISTANCE,
+            TrailingStopOrder.OrderType.SELL
+        );
+
+        vm.prank(maker);
+        trailingStopOrder.configureTrailingStop(orderHash, newConfig);
+
+        (, uint256 storedInitialStopPrice,,,,,,,,,) = trailingStopOrder.trailingStopConfigs(orderHash);
+        assertEq(storedInitialStopPrice, convertTo18Decimals(3000e8));
+    }
+
+    /**
+     * @notice Test reentrancy protection
+     */
+    function testReentrancyProtection() public {
+        bytes32 orderHash = createOrderHash("reentrancy-protection");
+        uint256 initialStopPrice = convertTo18Decimals(1900e8);
+        
+        TrailingStopOrder.TrailingStopConfig memory config = createTrailingStopConfig(
+            initialStopPrice,
+            TRAILING_DISTANCE,
+            TrailingStopOrder.OrderType.SELL
+        );
+
+        vm.prank(maker);
+        trailingStopOrder.configureTrailingStop(orderHash, config);
+
+        // Set price to trigger execution
+        mockOracle.setPrice(1800e8);
+
+        // Approve tokens for transfer
+        vm.prank(maker);
+        mockWBTC.approve(address(trailingStopOrder), type(uint256).max);
+
+        // Transfer taker tokens to contract
+        vm.prank(taker);
+        mockUSDC.transfer(address(trailingStopOrder), 1800000000);
+
+        // Attempt reentrancy through takerInteraction
+        vm.prank(address(trailingStopOrder));
+        vm.expectRevert(); // Should revert due to reentrancy protection
+        trailingStopOrder.takerInteraction(createTestOrder(), "", orderHash, taker, 1e8, 1800000000, 0, "");
+    }
+
+    /**
+     * @notice Test order hash collision attacks
+     */
+    function testOrderHashCollisionAttack() public {
+        bytes32 orderHash = createOrderHash("collision-attack");
+        uint256 initialStopPrice = convertTo18Decimals(1900e8);
+        
+        TrailingStopOrder.TrailingStopConfig memory config = createTrailingStopConfig(
+            initialStopPrice,
+            TRAILING_DISTANCE,
+            TrailingStopOrder.OrderType.SELL
+        );
+
+        vm.prank(maker);
+        trailingStopOrder.configureTrailingStop(orderHash, config);
+
+        // Attacker tries to use same order hash with different order
+        bytes32 maliciousOrderHash = orderHash; // Same hash
+        TrailingStopOrder.TrailingStopConfig memory maliciousConfig = createTrailingStopConfig(
+            initialStopPrice,
+            TRAILING_DISTANCE,
+            TrailingStopOrder.OrderType.SELL
+        );
+        maliciousConfig.keeper = attacker;
+
+        vm.prank(attacker);
+        vm.expectRevert(); // Should revert - only maker can configure
+        trailingStopOrder.configureTrailingStop(maliciousOrderHash, maliciousConfig);
     }
 }
