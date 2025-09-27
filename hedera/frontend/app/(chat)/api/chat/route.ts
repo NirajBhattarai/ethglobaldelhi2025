@@ -1,21 +1,3 @@
-import { geolocation } from "@vercel/functions";
-import {
-  convertToModelMessages,
-  createUIMessageStream,
-  JsonToSseTransformStream,
-  smoothStream,
-  stepCountIs,
-  streamText,
-} from "ai";
-import { unstable_cache as cache } from "next/cache";
-import { after } from "next/server";
-import {
-  createResumableStreamContext,
-  type ResumableStreamContext,
-} from "resumable-stream";
-import type { ModelCatalog } from "tokenlens/core";
-import { fetchModels } from "tokenlens/fetch";
-import { getUsage } from "tokenlens/helpers";
 import { auth, type UserType } from "@/app/(auth)/auth";
 import type { VisibilityType } from "@/components/visibility-selector";
 import { entitlementsByUserType } from "@/lib/ai/entitlements";
@@ -41,6 +23,24 @@ import { ChatSDKError } from "@/lib/errors";
 import type { ChatMessage } from "@/lib/types";
 import type { AppUsage } from "@/lib/usage";
 import { convertToUIMessages, generateUUID } from "@/lib/utils";
+import { geolocation } from "@vercel/functions";
+import {
+  convertToModelMessages,
+  createUIMessageStream,
+  JsonToSseTransformStream,
+  smoothStream,
+  stepCountIs,
+  streamText,
+} from "ai";
+import { unstable_cache as cache } from "next/cache";
+import { after } from "next/server";
+import {
+  createResumableStreamContext,
+  type ResumableStreamContext,
+} from "resumable-stream";
+import type { ModelCatalog } from "tokenlens/core";
+import { fetchModels } from "tokenlens/fetch";
+import { getUsage } from "tokenlens/helpers";
 import { generateTitleFromUserMessage } from "../../actions";
 import { type PostRequestBody, postRequestBodySchema } from "./schema";
 

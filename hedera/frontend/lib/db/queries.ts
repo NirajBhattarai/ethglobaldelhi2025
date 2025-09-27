@@ -32,18 +32,13 @@ import {
   user,
   vote,
 } from "./schema";
-import { generateHashedPassword } from "./utils";
-
-// Optionally, if not using email/pass login, you can
-// use the Drizzle adapter for Auth.js / NextAuth
-// https://authjs.dev/reference/adapter/drizzle
 
 // biome-ignore lint: Forbidden non-null assertion.
 const client = postgres(process.env.POSTGRES_URL!);
 const db = drizzle(client);
 
 export async function getUserByWalletAddress(
-  walletAddress: string,
+  walletAddress: string
 ): Promise<Array<User>> {
   try {
     return await db
@@ -52,8 +47,8 @@ export async function getUserByWalletAddress(
       .where(eq(user.walletAddress, walletAddress));
   } catch (error) {
     throw new ChatSDKError(
-      'bad_request:database',
-      'Failed to get user by wallet address',
+      "bad_request:database",
+      "Failed to get user by wallet address"
     );
   }
 }
@@ -64,7 +59,7 @@ export async function createWalletUser(walletAddress: string) {
       .insert(user)
       .values({
         walletAddress,
-        authType: 'wallet',
+        authType: "wallet",
       })
       .returning({
         id: user.id,
@@ -73,46 +68,8 @@ export async function createWalletUser(walletAddress: string) {
       });
   } catch (error) {
     throw new ChatSDKError(
-      'bad_request:database',
-      'Failed to create wallet user',
-    );
-  }
-}
-
-export async function getUser(email: string): Promise<User[]> {
-  try {
-    return await db.select().from(user).where(eq(user.email, email));
-  } catch (_error) {
-    throw new ChatSDKError(
       "bad_request:database",
-      "Failed to get user by email"
-    );
-  }
-}
-
-export async function createUser(email: string, password: string) {
-  const hashedPassword = generateHashedPassword(password);
-
-  try {
-    return await db.insert(user).values({ email, password: hashedPassword });
-  } catch (_error) {
-    throw new ChatSDKError("bad_request:database", "Failed to create user");
-  }
-}
-
-export async function createGuestUser() {
-  const email = `guest-${Date.now()}`;
-  const password = generateHashedPassword(generateUUID());
-
-  try {
-    return await db.insert(user).values({ email, password }).returning({
-      id: user.id,
-      email: user.email,
-    });
-  } catch (_error) {
-    throw new ChatSDKError(
-      "bad_request:database",
-      "Failed to create guest user"
+      "Failed to create wallet user"
     );
   }
 }
