@@ -5,13 +5,19 @@ pragma solidity ^0.8.23;
 import {AmountGetterBase} from "./AmountGetterBase.sol";
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {IOrderMixin} from "../interfaces/IOrderMixin.sol";
+import {IPreInteraction} from "../interfaces/IPreInteraction.sol";
+import {ITakerInteraction} from "../interfaces/ITakerInteraction.sol";
 
 /**
  * @title TrailingStopOrder
  * @notice A contract that implements the trailing stop order functionality for the 1inch Limit Order Protocol.
  */
-contract TrailingStopOrder is AmountGetterBase, Pausable {
+contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteraction {
     // libraries
+    using Math for uint256;
 
     // errors
 
@@ -19,6 +25,7 @@ contract TrailingStopOrder is AmountGetterBase, Pausable {
     error InvalidTrailingDistance();
     error TrailingStopNotConfigured();
     error InvalidUpdateFrequency();
+    error TrailingStopNotTriggered();
 
     // structs
 
@@ -58,6 +65,8 @@ contract TrailingStopOrder is AmountGetterBase, Pausable {
     );
 
     // modifiers
+
+    constructor() Ownable(msg.sender) {}
 
     function configureTrailingStop(bytes32 orderHash, TrailingStopConfig calldata config) external {
         address maker = msg.sender;
@@ -149,5 +158,91 @@ contract TrailingStopOrder is AmountGetterBase, Pausable {
         // Chainlink oracles return 8 decimal prices, convert to 18 decimals
         // Multiply by 10^10 to convert from 8 decimals to 18 decimals
         return uint256(answer) * 1e10;
+    }
+
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+
+    function _getMakingAmount(
+        IOrderMixin.Order calldata order,
+        bytes calldata extension,
+        bytes32 orderHash,
+        address taker,
+        uint256 takingAmount,
+        uint256 remainingMakingAmount,
+        bytes calldata extraData
+    ) internal view override returns (uint256) {
+        TrailingStopConfig memory config = trailingStopConfigs[orderHash];
+
+        // if the trailing stop is not configured, return the making amount from the base contract
+        if (config.configuredAt == 0) {
+            return super._getMakingAmount(
+                order, extension, orderHash, taker, takingAmount, remainingMakingAmount, extraData
+            );
+        }
+
+        // TODO: implement the logic to get the making amount
+        return 0;
+    }
+
+    function _getTakingAmount(
+        IOrderMixin.Order calldata order,
+        bytes calldata extension,
+        bytes32 orderHash,
+        address taker,
+        uint256 makingAmount,
+        uint256 remainingMakingAmount,
+        bytes calldata extraData
+    ) internal view override returns (uint256) {
+        TrailingStopConfig memory config = trailingStopConfigs[orderHash];
+        if (config.configuredAt == 0) {
+            return super._getTakingAmount(
+                order, extension, orderHash, taker, makingAmount, remainingMakingAmount, extraData
+            );
+
+            // TODO: implement the logic to get the taking amount
+            return 0;
+        }
+    }
+
+    function preInteraction(
+        IOrderMixin.Order calldata order,
+        bytes calldata extension,
+        bytes32 orderHash,
+        address taker,
+        uint256 makingAmount,
+        uint256 takingAmount,
+        uint256 remainingMakingAmount,
+        bytes calldata extraData
+    ) external override {
+        TrailingStopConfig memory config = trailingStopConfigs[orderHash];
+
+        // TODO: Need to decide what to do when no stop triggered
+        if (config.configuredAt == 0) {
+            revert TrailingStopNotTriggered();
+        }
+
+        uint256 currentPrice = _getCurrentPrice(config.makerAssetOracle);
+
+        // TODO: implement the logic to pre-interaction
+    }
+
+    function takerInteraction(
+        IOrderMixin.Order calldata order,
+        bytes calldata,
+        bytes32 orderHash,
+        address taker,
+        uint256 makingAmount,
+        uint256 takingAmount,
+        uint256 remainingMakingAmount,
+        bytes calldata extraData
+    ) external whenNotPaused {
+        TrailingStopConfig memory config = trailingStopConfigs[orderHash];
+        // TODO: implement the logic to taker interaction
     }
 }
