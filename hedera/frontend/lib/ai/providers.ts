@@ -1,4 +1,4 @@
-import { gateway } from "@ai-sdk/gateway";
+import { xai } from "@ai-sdk/xai";
 import {
   customProvider,
   extractReasoningMiddleware,
@@ -25,12 +25,12 @@ export const myProvider = isTestEnvironment
     })()
   : customProvider({
       languageModels: {
-        "chat-model": gateway.languageModel("xai/grok-2-vision-1212"),
+        "chat-model": xai("grok-2-vision-1212"),
         "chat-model-reasoning": wrapLanguageModel({
-          model: gateway.languageModel("xai/grok-3-mini"),
+          model: xai("grok-3-mini"),
           middleware: extractReasoningMiddleware({ tagName: "think" }),
         }),
-        "title-model": gateway.languageModel("xai/grok-2-1212"),
-        "artifact-model": gateway.languageModel("xai/grok-2-1212"),
+        "title-model": xai("grok-2-1212"),
+        "artifact-model": xai("grok-2-1212"),
       },
     });

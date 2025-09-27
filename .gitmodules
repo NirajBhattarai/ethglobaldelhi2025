@@ -1,3 +1,9 @@
 [submodule "1inch/trailingstop/lib/forge-std"]
 	path = 1inch/trailingstop/lib/forge-std
 	url = https://github.com/foundry-rs/forge-std
+[submodule "lib/openzeppelin-contracts"]
+	path = lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts
+[submodule "1inch/trailingstop/lib/solidity-utils"]
+	path = 1inch/trailingstop/lib/solidity-utils
+	url = https://github.com/1inch/solidity-utils

@@ -48,8 +48,44 @@ $ anvil
 ### Deploy
 
 ```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
+$ forge script script/<ScriptName>.s.sol:<ScriptName>Script --rpc-url <your_rpc_url> --private-key <your_private_key>
 ```
+
+## Helper Scripts
+
+### Register Upkeep
+
+Register the TrailingStopKeeper with Chainlink Automation on Sepolia:
+
+```shell
+$ forge script script/RegisterUpkeep.s.sol:RegisterUpkeepScript \
+  --rpc-url https://eth-sepolia.g.alchemy.com/v2/YOUR_API_KEY \
+  --broadcast \
+  --verify \
+  -vvvv
+```
+
+**Environment Variables Required:**
+- `PRIVATE_KEY`: Your wallet private key
+- `TRAILING_STOP_ORDER_ADDRESS`: (Optional) Address of deployed TrailingStopOrder contract
+- `KEEPER_ADDRESS`: (Optional) Address of deployed TrailingStopKeeper contract
+
+### Update Check Data
+
+Update the check data for existing upkeep:
+
+```shell
+$ forge script script/UpdateCheckData.s.sol:UpdateCheckDataScript \
+  --rpc-url https://eth-sepolia.g.alchemy.com/v2/YOUR_API_KEY \
+  --broadcast \
+  --verify \
+  -vvvv
+```
+
+**Environment Variables Required:**
+- `PRIVATE_KEY`: Your wallet private key
+- `UPKEEP_ID`: The upkeep ID to update
+- `ORDER_HASHES`: Comma-separated list of order hashes to monitor
 
 ### Cast
 
