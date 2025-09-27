@@ -63,7 +63,6 @@ contract TrailingStopKeeper is IAutomationCompatible {
         uint256 ordersUpdated = 0;
 
         for (uint256 i = 0; i < orderHashes.length; i++) {
-
             bytes32 orderHash = orderHashes[i]; // get order hash
 
             // Skip if already processed in this batch
@@ -121,7 +120,7 @@ contract TrailingStopKeeper is IAutomationCompatible {
                 , // address keeper
                 , // TrailingStopOrder.OrderType orderType
                 , // uint8 makerAssetDecimals
-                // uint8 takerAssetDecimals
+                    // uint8 takerAssetDecimals
             ) = trailingStopOrder.trailingStopConfigs(orderHashes[i]);
 
             // must be created and update frequency has passed
