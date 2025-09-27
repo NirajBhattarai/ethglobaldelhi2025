@@ -18,6 +18,7 @@ contract OrderFillMainnetTest is Test {
 
     // Mainnet addresses
     address constant BTC_USD_ORACLE = 0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c;
+    address constant USDC_USD_ORACLE = 0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6;
     address constant WBTC = 0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599;
     address constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
     address constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
@@ -33,6 +34,9 @@ contract OrderFillMainnetTest is Test {
 
     // ============ Setup ============
     function setUp() public {
+        // Set block timestamp to current time to avoid stale oracle issues
+        vm.warp(1758960107); // Use USDC oracle timestamp to avoid stale data
+
         // Deploy LimitOrderProtocol contract
         limitOrderProtocol = new LimitOrderProtocol(IWETH(WETH));
 
@@ -48,10 +52,10 @@ contract OrderFillMainnetTest is Test {
         vm.deal(maker, 100 ether);
         vm.deal(taker, 100 ether);
 
-        // Fund maker with WBTC using deal
+        // Fund maker with WBTC using deal (this will work in fork mode)
         deal(WBTC, maker, 1e8); // 1 WBTC (8 decimals)
 
-        // Fund taker with USDC using deal
+        // Fund taker with USDC using deal (this will work in fork mode)
         deal(USDC, taker, 120000e6); // 120k USDC (6 decimals)
 
         // Approve contracts
@@ -104,6 +108,7 @@ contract OrderFillMainnetTest is Test {
 
         // Use real mainnet BTC/USD oracle
         AggregatorV3Interface btcOracle = AggregatorV3Interface(BTC_USD_ORACLE);
+        AggregatorV3Interface usdcOracle = AggregatorV3Interface(USDC_USD_ORACLE);
 
         // Get current BTC price from mainnet oracle
         (, int256 currentPrice,,,) = btcOracle.latestRoundData();
@@ -132,6 +137,7 @@ contract OrderFillMainnetTest is Test {
         // 2. Configure trailing stop with real oracle
         TrailingStopOrder.TrailingStopConfig memory config = TrailingStopOrder.TrailingStopConfig({
             makerAssetOracle: btcOracle, // Use real mainnet oracle
+            takerAssetOracle: usdcOracle, // Add taker oracle
             initialStopPrice: (btcPrice * 9) / 10, // 90% of current price
             trailingDistance: 200, // 2%
             currentStopPrice: (btcPrice * 9) / 10,
@@ -139,7 +145,10 @@ contract OrderFillMainnetTest is Test {
             lastUpdateAt: block.timestamp,
             updateFrequency: 300,
             maxSlippage: 100, // 1%
-            keeper: address(0),
+            maxPriceDeviation: 500, // 5% max deviation from TWAP
+            twapWindow: 900, // 15 minutes TWAP window
+            keeper: maker, // Use maker as keeper for testing
+            orderMaker: maker, // Use maker as order maker
             orderType: TrailingStopOrder.OrderType.SELL,
             makerAssetDecimals: 0, // Will be set automatically
             takerAssetDecimals: 0 // Will be set automatically
@@ -150,7 +159,7 @@ contract OrderFillMainnetTest is Test {
 
         // 3. Update trailing stop
         vm.warp(block.timestamp + 600);
-        vm.prank(taker);
+        vm.prank(maker); // Use maker as keeper
         trailingStopOrder.updateTrailingStop(orderHash);
 
         // 4. Prepare interaction data
