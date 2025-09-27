@@ -146,6 +146,10 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
     function updateTrailingStop(bytes32 orderHash) external whenNotPaused onlyKeeper(orderHash) {
         TrailingStopConfig storage config = trailingStopConfigs[orderHash];
 
+        if (msg.sender != config.keeper) {
+            revert OnlyKeeper();
+        }
+
         // this happens when the order is not configured
         if (config.configuredAt == 0) {
             revert TrailingStopNotConfigured();
