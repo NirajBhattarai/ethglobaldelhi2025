@@ -139,6 +139,8 @@ contract OrderFillMainnetTest is Test {
             lastUpdateAt: block.timestamp,
             updateFrequency: 300,
             maxSlippage: 100, // 1%
+            maxPriceDeviation: 500, // 5% max deviation from TWAP
+            twapWindow: 900, // 15 minutes TWAP window
             keeper: address(0),
             orderType: TrailingStopOrder.OrderType.SELL,
             makerAssetDecimals: 0, // Will be set automatically

@@ -63,7 +63,6 @@ contract TrailingStopKeeper is IAutomationCompatible {
         uint256 ordersUpdated = 0;
 
         for (uint256 i = 0; i < orderHashes.length; i++) {
-            //TODO: process order
 
             bytes32 orderHash = orderHashes[i]; // get order hash
 
@@ -117,9 +116,12 @@ contract TrailingStopKeeper is IAutomationCompatible {
                 uint256 lastUpdateAt,
                 uint256 updateFrequency,
                 , // uint256 maxSlippage
+                , // uint256 maxPriceDeviation
+                , // uint256 twapWindow
                 , // address keeper
                 , // TrailingStopOrder.OrderType orderType
                 , // uint8 makerAssetDecimals
+                // uint8 takerAssetDecimals
             ) = trailingStopOrder.trailingStopConfigs(orderHashes[i]);
 
             // must be created and update frequency has passed

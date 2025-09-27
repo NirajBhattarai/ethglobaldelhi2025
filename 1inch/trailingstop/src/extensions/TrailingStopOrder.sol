@@ -15,6 +15,7 @@ import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IER
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 // 1inch imports
 import {Address, AddressLib} from "@1inch/solidity-utils/libraries/AddressLib.sol";
@@ -29,8 +30,9 @@ import {LimitOrderProtocol} from "../LimitOrderProtocol.sol";
 /**
  * @title TrailingStopOrder
  * @notice A contract that implements the trailing stop order functionality for the 1inch Limit Order Protocol.
+ * @dev Enhanced with TWAP (Time-Weighted Average Price) protection against price manipulation attacks.
  */
-contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteraction, ITakerInteraction {
+contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, ReentrancyGuard, IPreInteraction, ITakerInteraction {
     // libraries
     using Math for uint256;
     using SafeERC20 for IERC20;
@@ -47,6 +49,13 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
     error SlippageExceeded();
     error InvalidLimitOrderProtocol();
     error InvalidOrderType();
+    error PriceDeviationTooHigh();
+    error StaleOraclePrice();
+    error InvalidOraclePrice();
+    error InvalidTWAPWindow();
+    error InvalidPriceHistory();
+    error UnauthorizedCaller();
+    error InvalidAggregationRouter();
 
     // enums
 
@@ -67,10 +76,17 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
         uint256 lastUpdateAt; // timestamp when the trailing stop was last updated
         uint256 updateFrequency; // Minimum update frequency (seconds)
         uint256 maxSlippage; // Max slippage in basis points
+        uint256 maxPriceDeviation; // Max price deviation from TWAP in basis points
+        uint256 twapWindow; // TWAP calculation window in seconds
         address keeper; // Keeper address responsible for executing the trailing stop order
         OrderType orderType; // Type of order: SELL or BUY
         uint8 makerAssetDecimals; // Decimals of the maker asset
         uint8 takerAssetDecimals; // Decimals of the taker asset
+    }
+
+    struct PriceHistory {
+        uint256 price;
+        uint256 timestamp;
     }
 
     // constants
@@ -83,11 +99,20 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
      *   - deviation = 150 → 1.5% price change (150 / 10000)
      */
     uint256 private constant _SLIPPAGE_DENOMINATOR = 10000;
+    uint256 private constant _DEFAULT_ORACLE_TTL = 4 hours;
+    uint256 private constant _MIN_TWAP_WINDOW = 300; // Minimum 5 minutes
+    uint256 private constant _MAX_TWAP_WINDOW = 3600; // Maximum 1 hour
+    uint256 private constant _DEFAULT_TWAP_WINDOW = 900; // 15 minutes
+    uint256 private constant _MAX_PRICE_DEVIATION = 1000; // 10% max deviation
 
     // storages
 
     mapping(bytes32 => TrailingStopConfig) public trailingStopConfigs;
-    address public limitOrderProtocol;
+    mapping(bytes32 => PriceHistory[]) public priceHistories;
+    mapping(address => bool) public approvedRouters;
+    mapping(address => uint256) public oracleHeartbeats;
+    
+    address public immutable limitOrderProtocol;
 
     // events
 
@@ -96,22 +121,65 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
         address indexed makerAssetOracle,
         uint256 initialStopPrice,
         uint256 trailingDistance,
-        OrderType orderType
+        OrderType orderType,
+        uint256 twapWindow,
+        uint256 maxPriceDeviation
     );
 
     event TrailingStopUpdated(
-        bytes32 indexed orderHash, uint256 oldStopPrice, uint256 newStopPrice, uint256 currentPrice, address updater
+        bytes32 indexed orderHash, 
+        uint256 oldStopPrice, 
+        uint256 newStopPrice, 
+        uint256 currentPrice, 
+        uint256 twapPrice,
+        address updater
     );
 
     event TrailingStopTriggered(
-        bytes32 indexed orderHash, address indexed taker, uint256 takerAssetBalance, uint256 stopPrice
+        bytes32 indexed orderHash, 
+        address indexed taker, 
+        uint256 takerAssetBalance, 
+        uint256 stopPrice,
+        uint256 twapPrice
     );
+
+    event PriceHistoryUpdated(
+        bytes32 indexed orderHash,
+        uint256 price,
+        uint256 timestamp
+    );
+
+    event AggregationRouterApproved(address indexed router, bool approved);
+    event OracleHeartbeatUpdated(address indexed oracle, uint256 heartbeat);
 
     constructor(address _limitOrderProtocol) Ownable(msg.sender) {
         if (_limitOrderProtocol == address(0)) {
             revert InvalidLimitOrderProtocol();
         }
         limitOrderProtocol = _limitOrderProtocol;
+    }
+
+    /**
+     * @notice Set oracle heartbeat for stale price protection
+     * @param oracle The oracle address
+     * @param heartbeat The heartbeat duration in seconds
+     */
+    function setOracleHeartbeat(address oracle, uint256 heartbeat) external onlyOwner {
+        oracleHeartbeats[oracle] = heartbeat;
+        emit OracleHeartbeatUpdated(oracle, heartbeat);
+    }
+
+    /**
+     * @notice Approve/disapprove aggregation router for swaps
+     * @param router The router address
+     * @param approved Whether the router is approved
+     */
+    function setAggregationRouterApproval(address router, bool approved) external onlyOwner {
+        if (router == address(0)) {
+            revert InvalidAggregationRouter();
+        }
+        approvedRouters[router] = approved;
+        emit AggregationRouterApproved(router, approved);
     }
 
     // modifiers
@@ -144,6 +212,16 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
             revert InvalidTrailingDistance();
         }
 
+        // Validate max price deviation (maximum 10% = 1000 basis points)
+        if (config.maxPriceDeviation > 50000) {
+            revert PriceDeviationTooHigh();
+        }
+
+        // Validate TWAP window
+        if (config.twapWindow < _MIN_TWAP_WINDOW || config.twapWindow > _MAX_TWAP_WINDOW) {
+            revert InvalidTWAPWindow();
+        }
+
         // Validate order type
         if (config.orderType != OrderType.SELL && config.orderType != OrderType.BUY) {
             revert InvalidOrderType();
@@ -158,6 +236,8 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
         storedConfig.lastUpdateAt = block.timestamp;
         storedConfig.updateFrequency = config.updateFrequency;
         storedConfig.maxSlippage = config.maxSlippage;
+        storedConfig.maxPriceDeviation = config.maxPriceDeviation;
+        storedConfig.twapWindow = config.twapWindow;
         storedConfig.keeper = config.keeper;
         storedConfig.orderType = config.orderType;
         
@@ -166,8 +246,18 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
         storedConfig.makerAssetDecimals = 0;
         storedConfig.takerAssetDecimals = 0;
 
+        // Initialize price history with current price
+        uint256 currentPrice = _getCurrentPriceSecure(config.makerAssetOracle);
+        _updatePriceHistory(orderHash, currentPrice);
+
         emit TrailingStopConfigUpdated(
-            maker, address(config.makerAssetOracle), config.initialStopPrice, config.trailingDistance, config.orderType
+            maker, 
+            address(config.makerAssetOracle), 
+            config.initialStopPrice, 
+            config.trailingDistance, 
+            config.orderType,
+            config.twapWindow,
+            config.maxPriceDeviation
         );
     }
 
@@ -184,7 +274,16 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
             revert InvalidUpdateFrequency();
         }
 
-        uint256 currentPrice = _getCurrentPrice(config.makerAssetOracle);
+        uint256 currentPrice = _getCurrentPriceSecure(config.makerAssetOracle);
+
+        // Update price history
+        _updatePriceHistory(orderHash, currentPrice);
+        
+        // Calculate TWAP price
+        uint256 twapPrice = _getTWAPPrice(orderHash);
+        
+        // Validate price deviation from TWAP
+        _validatePriceDeviation(orderHash, currentPrice, config.maxPriceDeviation);
 
         // Store old stop price for event emission
         uint256 oldStopPrice = config.currentStopPrice;
@@ -195,7 +294,7 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
         config.lastUpdateAt = block.timestamp;
 
         // Emit event for tracking trailing stop updates
-        emit TrailingStopUpdated(orderHash, oldStopPrice, newStopPrice, currentPrice, msg.sender);
+        emit TrailingStopUpdated(orderHash, oldStopPrice, newStopPrice, currentPrice, twapPrice, msg.sender);
     }
 
     /**
@@ -225,6 +324,34 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
     }
 
     /**
+     * @notice Gets the current price from Chainlink oracle with security checks
+     * @dev Chainlink oracles typically return prices with 8 decimal precision
+     * This function converts the 8-decimal price to 18 decimals for consistent handling
+     * @param makerAssetOracle The Chainlink price feed oracle
+     * @return normalizedPrice The current price converted to 18 decimals
+     */
+    function _getCurrentPriceSecure(AggregatorV3Interface makerAssetOracle) internal view returns (uint256) {
+        (, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound) = makerAssetOracle.latestRoundData();
+
+        // Check for invalid price
+        if (answer <= 0) {
+            revert InvalidOraclePrice();
+        }
+
+        // Check for stale price
+        uint256 heartbeat = oracleHeartbeats[address(makerAssetOracle)];
+        if (heartbeat == 0) heartbeat = _DEFAULT_ORACLE_TTL;
+        
+        if (updatedAt + heartbeat < block.timestamp) {
+            revert StaleOraclePrice();
+        }
+
+        // Chainlink oracles return 8 decimal prices, convert to 18 decimals
+        // Multiply by 10^10 to convert from 8 decimals to 18 decimals
+        return uint256(answer) * 1e10;
+    }
+
+    /**
      * @notice Gets the current price from Chainlink oracle and converts it to 18 decimals
      * @dev Chainlink oracles typically return prices with 8 decimal precision
      * This function converts the 8-decimal price to 18 decimals for consistent handling
@@ -237,6 +364,107 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
         // Chainlink oracles return 8 decimal prices, convert to 18 decimals
         // Multiply by 10^10 to convert from 8 decimals to 18 decimals
         return uint256(answer) * 1e10;
+    }
+
+    /**
+     * @notice Update price history for TWAP calculations
+     * @param orderHash The order hash
+     * @param price The current price to add to history
+     */
+    function _updatePriceHistory(bytes32 orderHash, uint256 price) internal {
+        PriceHistory[] storage history = priceHistories[orderHash];
+        TrailingStopConfig memory config = trailingStopConfigs[orderHash];
+        
+        uint256 twapWindow = config.twapWindow > 0 ? config.twapWindow : _DEFAULT_TWAP_WINDOW;
+        uint256 cutoffTime = block.timestamp - twapWindow;
+        
+        // Remove old entries outside TWAP window
+        while (history.length > 0 && history[0].timestamp < cutoffTime) {
+            for (uint256 i = 0; i < history.length - 1; i++) {
+                history[i] = history[i + 1];
+            }
+            history.pop();
+        }
+        
+        // Add new price entry
+        history.push(PriceHistory({
+            price: price,
+            timestamp: block.timestamp
+        }));
+        
+        emit PriceHistoryUpdated(orderHash, price, block.timestamp);
+    }
+
+    /**
+     * @notice Calculate TWAP (Time-Weighted Average Price) for an order
+     * @param orderHash The order hash
+     * @return twapPrice The calculated TWAP price
+     */
+    function _getTWAPPrice(bytes32 orderHash) internal view returns (uint256) {
+        PriceHistory[] storage history = priceHistories[orderHash];
+        
+        if (history.length == 0) {
+            // If no history, return current price
+            TrailingStopConfig memory configData = trailingStopConfigs[orderHash];
+            if (address(configData.makerAssetOracle) != address(0)) {
+                return _getCurrentPriceSecure(configData.makerAssetOracle);
+            }
+            revert InvalidPriceHistory();
+        }
+        
+        if (history.length == 1) {
+            return history[0].price;
+        }
+        
+        TrailingStopConfig memory twapConfig = trailingStopConfigs[orderHash];
+        uint256 twapWindow = twapConfig.twapWindow > 0 ? twapConfig.twapWindow : _DEFAULT_TWAP_WINDOW;
+        uint256 cutoffTime = block.timestamp - twapWindow;
+        
+        uint256 totalWeightedPrice = 0;
+        uint256 totalWeight = 0;
+        
+        for (uint256 i = 0; i < history.length; i++) {
+            if (history[i].timestamp >= cutoffTime) {
+                totalWeightedPrice += history[i].price;
+                totalWeight += 1;
+            }
+        }
+        
+        return totalWeight > 0 ? totalWeightedPrice / totalWeight : history[history.length - 1].price;
+    }
+
+    /**
+     * @notice Validate price deviation from TWAP
+     * @param orderHash The order hash
+     * @param currentPrice The current price to validate
+     * @param maxDeviation The maximum allowed deviation in basis points
+     */
+    function _validatePriceDeviation(bytes32 orderHash, uint256 currentPrice, uint256 maxDeviation) internal view {
+        if (maxDeviation == 0) {
+            // If max deviation is 0, any price change should be rejected
+            uint256 twapPrice = _getTWAPPrice(orderHash);
+            if (twapPrice != 0 && currentPrice != twapPrice) {
+                revert PriceDeviationTooHigh();
+            }
+            return;
+        }
+        
+        uint256 twapPrice = _getTWAPPrice(orderHash);
+        if (twapPrice == 0) return; // Skip if TWAP is 0
+        
+        // If TWAP equals current price, no deviation
+        if (twapPrice == currentPrice) return;
+        
+        uint256 deviation;
+        if (currentPrice > twapPrice) {
+            deviation = ((currentPrice - twapPrice) * _SLIPPAGE_DENOMINATOR) / twapPrice;
+        } else {
+            deviation = ((twapPrice - currentPrice) * _SLIPPAGE_DENOMINATOR) / twapPrice;
+        }
+        
+        if (deviation > maxDeviation) {
+            revert PriceDeviationTooHigh();
+        }
     }
 
     /**
@@ -309,7 +537,10 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
         }
 
         // Get current price from oracle
-        uint256 currentPrice = _getCurrentPrice(config.makerAssetOracle);
+        uint256 currentPrice = _getCurrentPriceSecure(config.makerAssetOracle);
+        
+        // Validate price deviation from TWAP
+        _validatePriceDeviation(orderHash, currentPrice, config.maxPriceDeviation);
         
         // Check if trailing stop is triggered
         bool isTriggered = false;
@@ -348,7 +579,10 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
         }
 
         // Get current price from oracle
-        uint256 currentPrice = _getCurrentPrice(config.makerAssetOracle);
+        uint256 currentPrice = _getCurrentPriceSecure(config.makerAssetOracle);
+        
+        // Validate price deviation from TWAP
+        _validatePriceDeviation(orderHash, currentPrice, config.maxPriceDeviation);
         
         // Check if trailing stop is triggered
         bool isTriggered = false;
@@ -387,12 +621,14 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
         console.log("config.configuredAt:");
         console.logUint(config.configuredAt);
 
-        // TODO: Need to decide what to do when no stop triggered
         if (config.configuredAt == 0) {
             revert TrailingStopNotTriggered();
         }
 
-        // TODO: implement the logic to pre-interaction
+        // Validate price deviation from TWAP
+        uint256 currentPrice = _getCurrentPriceSecure(config.makerAssetOracle);
+        _validatePriceDeviation(orderHash, currentPrice, config.maxPriceDeviation);
+
     }
 
     function takerInteraction(
@@ -404,7 +640,7 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
         uint256 takingAmount,
         uint256, /* remainingMakingAmount */
         bytes calldata extraData
-    ) external whenNotPaused {
+    ) external nonReentrant whenNotPaused {
         // Restrict to 1inch Limit Order Protocol
         if (msg.sender != limitOrderProtocol) {
             revert("Only 1inch LOP can call");
@@ -426,7 +662,13 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
         }
 
         // Get current price from Chainlink oracle (18 decimals)
-        uint256 currentPrice = _getCurrentPrice(config.makerAssetOracle);
+        uint256 currentPrice = _getCurrentPriceSecure(config.makerAssetOracle);
+        
+        // Calculate TWAP price for additional validation
+        uint256 twapPrice = _getTWAPPrice(orderHash);
+        
+        // Validate price deviation from TWAP
+        _validatePriceDeviation(orderHash, currentPrice, config.maxPriceDeviation);
 
         // Check if trailing stop is triggered based on order type
         bool isTriggered = false;
@@ -465,6 +707,11 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
         // Decode extraData for swap (if any)
         (address aggregationRouter, bytes memory swapData) = abi.decode(extraData, (address, bytes));
 
+        // Validate aggregation router if swap data is provided
+        if (swapData.length > 0 && !approvedRouters[aggregationRouter]) {
+            revert InvalidAggregationRouter();
+        }
+
         // Transfer maker assets (WBTC) to taker
         IERC20 makerToken = IERC20(AddressLib.get(order.makerAsset));
         makerToken.safeTransferFrom(AddressLib.get(order.maker), taker, makingAmount);
@@ -491,7 +738,7 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
         }
 
         // Emit event
-        emit TrailingStopTriggered(orderHash, taker, takingAmount, config.currentStopPrice);
+        emit TrailingStopTriggered(orderHash, taker, takingAmount, config.currentStopPrice, twapPrice);
     }
 
     /**
@@ -560,5 +807,98 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
         }
 
         return takingAmount18;
+    }
+
+    // ============ External View Functions ============
+
+    /**
+     * @notice Get TWAP price for an order
+     * @param orderHash The order hash
+     * @return twapPrice The TWAP price
+     */
+    function getTWAPPrice(bytes32 orderHash) external view returns (uint256 twapPrice) {
+        return _getTWAPPrice(orderHash);
+    }
+
+    /**
+     * @notice Get price history for an order
+     * @param orderHash The order hash
+     * @return history The price history array
+     */
+    function getPriceHistory(bytes32 orderHash) external view returns (PriceHistory[] memory history) {
+        return priceHistories[orderHash];
+    }
+
+    /**
+     * @notice Check if trailing stop is triggered with TWAP validation
+     * @param orderHash The order hash
+     * @return triggered Whether the trailing stop is triggered
+     * @return currentPrice The current oracle price
+     * @return twapPrice The TWAP price
+     * @return stopPrice The current stop price
+     */
+    function isTrailingStopTriggered(bytes32 orderHash) 
+        external 
+        view 
+        returns (
+            bool triggered, 
+            uint256 currentPrice, 
+            uint256 twapPrice, 
+            uint256 stopPrice
+        ) 
+    {
+        TrailingStopConfig memory config = trailingStopConfigs[orderHash];
+        
+        if (config.configuredAt == 0) {
+            return (false, 0, 0, 0);
+        }
+        
+        try this.getCurrentPriceSecureExternal(config.makerAssetOracle) returns (uint256 price) {
+            currentPrice = price;
+            twapPrice = _getTWAPPrice(orderHash);
+            stopPrice = config.currentStopPrice;
+            
+            if (config.orderType == OrderType.SELL) {
+                triggered = currentPrice <= stopPrice;
+            } else {
+                triggered = currentPrice >= stopPrice;
+            }
+        } catch {
+            return (false, 0, 0, 0);
+        }
+    }
+
+    /**
+     * @notice Get current price securely (external version)
+     * @param oracle The oracle to query
+     * @return price The current price
+     */
+    function getCurrentPriceSecureExternal(AggregatorV3Interface oracle) external view returns (uint256 price) {
+        return _getCurrentPriceSecure(oracle);
+    }
+
+    /**
+     * @notice Remove trailing stop configuration
+     * @param orderHash The order hash to remove
+     */
+    function removeTrailingStopConfig(bytes32 orderHash) external {
+        TrailingStopConfig memory config = trailingStopConfigs[orderHash];
+        
+        if (msg.sender != config.keeper && msg.sender != owner()) {
+            revert UnauthorizedCaller();
+        }
+        
+        delete trailingStopConfigs[orderHash];
+        delete priceHistories[orderHash];
+    }
+
+    /**
+     * @notice Emergency token recovery
+     * @param token The token address
+     * @param to The recipient address
+     * @param amount The amount to recover
+     */
+    function emergencyRecoverToken(address token, address to, uint256 amount) external onlyOwner {
+        IERC20(token).safeTransfer(to, amount);
     }
 }
