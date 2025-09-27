@@ -88,7 +88,9 @@ contract OrderFillMainnetTest is Test {
             currentStopPrice: 45000e18,
             configuredAt: block.timestamp,
             lastUpdateAt: block.timestamp,
-            updateFrequency: 300 // 5 minutes
+            updateFrequency: 300, // 5 minutes
+            maxSlippage: 100, // 1% max slippage (100 basis points)
+            keeper: address(0) // No specific keeper set
         });
 
         console.log("Configuring trailing stop...");
@@ -107,7 +109,7 @@ contract OrderFillMainnetTest is Test {
         trailingStopOrder.updateTrailingStop(orderHash);
 
         // 5. Get updated stop price
-        (,,, uint256 currentStopPrice,,,) = trailingStopOrder.trailingStopConfigs(orderHash);
+        (,,, uint256 currentStopPrice,,,,,) = trailingStopOrder.trailingStopConfigs(orderHash);
         console.log("Updated Stop Price: $%s", currentStopPrice / 1e18);
 
         // 6. Create mock order for taker interaction
@@ -133,7 +135,9 @@ contract OrderFillMainnetTest is Test {
             uint256 updatedStopPrice,
             ,
             ,
-            uint256 updateFrequency
+            uint256 updateFrequency,
+            ,
+            
         ) = trailingStopOrder.trailingStopConfigs(orderHash);
 
         assertEq(address(oracle), BTC_USD_ORACLE, "Oracle address should match");
@@ -151,7 +155,7 @@ contract OrderFillMainnetTest is Test {
         trailingStopOrder.updateTrailingStop(orderHash);
 
         // Verify the stop price was updated again (or remained the same if price didn't change)
-        (,,, uint256 finalStopPrice,,,) = trailingStopOrder.trailingStopConfigs(orderHash);
+        (,,, uint256 finalStopPrice,,,,,) = trailingStopOrder.trailingStopConfigs(orderHash);
         // The stop price should either be the same (if BTC price didn't change) or different (if it did)
         // This is correct behavior for trailing stops
         assertTrue(finalStopPrice >= updatedStopPrice, "Stop price should not decrease");

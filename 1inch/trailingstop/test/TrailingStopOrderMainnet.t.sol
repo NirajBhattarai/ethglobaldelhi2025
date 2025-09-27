@@ -111,7 +111,9 @@ contract TrailingStopOrderTest is Test {
             uint256 storedCurrentStopPrice,
             uint256 configuredAt,
             uint256 lastUpdateAt,
-            uint256 updateFrequency
+            uint256 updateFrequency,
+            uint256 maxSlippage,
+            address keeper
         ) = trailingStopOrder.trailingStopConfigs(orderHash);
 
         assertEq(address(oracle), ETH_USD_ORACLE);
@@ -206,7 +208,9 @@ contract TrailingStopOrderTest is Test {
             uint256 storedCurrentStopPrice,
             uint256 configuredAt,
             uint256 lastUpdateAt,
-            uint256 updateFrequency
+            uint256 updateFrequency,
+            uint256 maxSlippage,
+            address keeper
         ) = trailingStopOrder.trailingStopConfigs(orderHash);
 
         assertEq(address(oracle), BTC_USD_ORACLE);
@@ -248,7 +252,9 @@ contract TrailingStopOrderTest is Test {
             uint256 storedCurrentStopPrice,
             uint256 configuredAt,
             uint256 lastUpdateAt,
-            uint256 updateFrequency
+            uint256 updateFrequency,
+            uint256 maxSlippage,
+            address keeper
         ) = trailingStopOrder.trailingStopConfigs(orderHash);
 
         assertEq(address(oracle), BTC_USD_ORACLE);

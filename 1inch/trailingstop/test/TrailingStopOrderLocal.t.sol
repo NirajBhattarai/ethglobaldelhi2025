@@ -194,7 +194,9 @@ contract TrailingStopOrderLocalTest is Test {
             uint256 storedCurrentStopPrice,
             uint256 configuredAt,
             uint256 lastUpdateAt,
-            uint256 updateFrequency
+            uint256 updateFrequency,
+            uint256 maxSlippage,
+            address keeper
         ) = trailingStopOrder.trailingStopConfigs(orderHash);
 
         assertEq(address(oracle), address(ethUsdOracle));
@@ -291,7 +293,9 @@ contract TrailingStopOrderLocalTest is Test {
             uint256 storedCurrentStopPrice,
             uint256 configuredAt,
             uint256 lastUpdateAt,
-            uint256 updateFrequency
+            uint256 updateFrequency,
+            uint256 maxSlippage,
+            address keeper
         ) = trailingStopOrder.trailingStopConfigs(orderHash);
 
         assertEq(address(oracle), address(btcUsdOracle));
@@ -333,7 +337,9 @@ contract TrailingStopOrderLocalTest is Test {
             uint256 storedCurrentStopPrice,
             uint256 configuredAt,
             uint256 lastUpdateAt,
-            uint256 updateFrequency
+            uint256 updateFrequency,
+            uint256 maxSlippage,
+            address keeper
         ) = trailingStopOrder.trailingStopConfigs(orderHash);
 
         assertEq(address(oracle), address(btcUsdOracle));
@@ -371,7 +377,9 @@ contract TrailingStopOrderLocalTest is Test {
             ,
             uint256 configuredAt1,
             uint256 lastUpdateAt1,
-            uint256 updateFrequency1
+            uint256 updateFrequency,
+            uint256 maxSlippage,
+            address keeper1
         ) = trailingStopOrder.trailingStopConfigs(orderHash1);
         (
             AggregatorV3Interface oracle2,
@@ -380,7 +388,9 @@ contract TrailingStopOrderLocalTest is Test {
             ,
             uint256 configuredAt2,
             uint256 lastUpdateAt2,
-            uint256 updateFrequency2
+            uint256 updateFrequency2,
+            uint256 maxSlippage2,
+            address keeper2
         ) = trailingStopOrder.trailingStopConfigs(orderHash2);
 
         assertEq(address(oracle1), address(ethUsdOracle));

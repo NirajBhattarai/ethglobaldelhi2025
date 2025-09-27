@@ -115,7 +115,9 @@ contract TrailingStopKeeper is IAutomationCompatible {
                 , // uint256 currentStopPrice
                 uint256 configuredAt,
                 uint256 lastUpdateAt,
-                uint256 updateFrequency
+                uint256 updateFrequency,
+                , // uint256 maxSlippage
+                 // address keeper
             ) = trailingStopOrder.trailingStopConfigs(orderHashes[i]);
 
             // must be created and update frequency has passed

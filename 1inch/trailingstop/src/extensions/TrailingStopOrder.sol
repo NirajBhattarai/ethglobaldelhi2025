@@ -38,6 +38,8 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
     error InvalidUpdateFrequency();
     error TrailingStopNotTriggered();
     error SwapExecutionFailed();
+    error OnlyKeeper();
+    error SlippageExceeded();
 
     // structs
 
@@ -49,6 +51,8 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
         uint256 configuredAt; // timestamp when the trailing stop was configured
         uint256 lastUpdateAt; // timestamp when the trailing stop was last updated
         uint256 updateFrequency; // Minimum update frequency (seconds)
+        uint256 maxSlippage; // Max slippage in basis points
+        address keeper; // Keeper address responsible for executing the trailing stop order
     }
 
     // constants
@@ -86,6 +90,15 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
 
     constructor() Ownable(msg.sender) {}
 
+    // modifiers
+    modifier onlyKeeper(bytes32 orderHash) {
+        TrailingStopConfig memory config = trailingStopConfigs[orderHash];
+        if (config.keeper != address(0) && config.keeper != msg.sender) {
+            revert OnlyKeeper();
+        }
+        _;
+    }
+
     function configureTrailingStop(bytes32 orderHash, TrailingStopConfig calldata config) external {
         address maker = msg.sender;
 
@@ -102,6 +115,11 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
             revert InvalidTrailingDistance();
         }
 
+        // Validate max slippage (maximum 10% = 1000 basis points)
+        if (config.maxSlippage > 1000) {
+            revert InvalidTrailingDistance();
+        }
+
         TrailingStopConfig storage storedConfig = trailingStopConfigs[orderHash];
         storedConfig.makerAssetOracle = config.makerAssetOracle;
         storedConfig.initialStopPrice = config.initialStopPrice;
@@ -110,13 +128,15 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
         storedConfig.configuredAt = block.timestamp;
         storedConfig.lastUpdateAt = block.timestamp;
         storedConfig.updateFrequency = config.updateFrequency;
+        storedConfig.maxSlippage = config.maxSlippage;
+        storedConfig.keeper = config.keeper;
 
         emit TrailingStopConfigUpdated(
             maker, address(config.makerAssetOracle), config.initialStopPrice, config.trailingDistance
         );
     }
 
-    function updateTrailingStop(bytes32 orderHash) external whenNotPaused {
+    function updateTrailingStop(bytes32 orderHash) external whenNotPaused onlyKeeper(orderHash) {
         TrailingStopConfig storage config = trailingStopConfigs[orderHash];
 
         // this happens when the order is not configured
@@ -178,6 +198,23 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
         return uint256(answer) * 1e10;
     }
 
+    /**
+     * @notice Calculates the slippage between expected and actual execution price
+     * @dev Slippage = |actualPrice - expectedPrice| / expectedPrice * 10000 (basis points)
+     * @param expectedPrice The expected execution price (18 decimals)
+     * @param actualPrice The actual execution price (18 decimals)
+     * @return slippageBps The slippage in basis points
+     */
+    function _calculateSlippage(uint256 expectedPrice, uint256 actualPrice) internal pure returns (uint256) {
+        if (expectedPrice == 0) return 0;
+        
+        uint256 priceDifference = expectedPrice > actualPrice 
+            ? expectedPrice - actualPrice 
+            : actualPrice - expectedPrice;
+            
+        return (priceDifference * _SLIPPAGE_DENOMINATOR) / expectedPrice;
+    }
+
     function pause() external onlyOwner {
         _pause();
     }
@@ -222,22 +259,22 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
             return super._getTakingAmount(
                 order, extension, orderHash, taker, makingAmount, remainingMakingAmount, extraData
             );
-
-            // TODO: implement the logic to get the taking amount
-            return 0;
         }
+        
+        // TODO: implement the logic to get the taking amount
+        return 0;
     }
 
     function preInteraction(
-        IOrderMixin.Order calldata order,
-        bytes calldata extension,
+        IOrderMixin.Order calldata /* order */,
+        bytes calldata /* extension */,
         bytes32 orderHash,
-        address taker,
-        uint256 makingAmount,
-        uint256 takingAmount,
-        uint256 remainingMakingAmount,
-        bytes calldata extraData
-    ) external override {
+        address /* taker */,
+        uint256 /* makingAmount */,
+        uint256 /* takingAmount */,
+        uint256 /* remainingMakingAmount */,
+        bytes calldata /* extraData */
+    ) external view override {
         TrailingStopConfig memory config = trailingStopConfigs[orderHash];
 
         // TODO: Need to decide what to do when no stop triggered
@@ -245,20 +282,18 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
             revert TrailingStopNotTriggered();
         }
 
-        uint256 currentPrice = _getCurrentPrice(config.makerAssetOracle);
-
         // TODO: implement the logic to pre-interaction
     }
 
     function takerInteraction(
         IOrderMixin.Order calldata order,
-        bytes calldata,
+        bytes calldata /* extension */,
         bytes32 orderHash,
         address taker,
         uint256 makingAmount,
         uint256 takingAmount,
-        uint256 remainingMakingAmount,
-        bytes calldata extraData
+        uint256 /* remainingMakingAmount */,
+        bytes calldata /* extraData */
     ) external whenNotPaused {
         TrailingStopConfig memory config = trailingStopConfigs[orderHash];
 
@@ -273,8 +308,22 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
         // Check if the trailing stop condition is triggered
         uint256 currentPrice = _getCurrentPrice(config.makerAssetOracle);
 
-        // Decode the aggregation router address from extraData
-        address aggregationRouter = abi.decode(extraData, (address));
+        // Verify the stop condition is met (current price <= stop price)
+        if (currentPrice > config.currentStopPrice) {
+            revert TrailingStopNotTriggered();
+        }
+
+        // Calculate expected execution price based on order amounts
+        uint256 expectedPrice = (takingAmount * 1e18) / makingAmount;
+        
+        // Calculate actual execution price based on current market price
+        uint256 actualPrice = currentPrice;
+        
+        // Check slippage protection
+        uint256 slippage = _calculateSlippage(expectedPrice, actualPrice);
+        if (slippage > config.maxSlippage) {
+            revert SlippageExceeded();
+        }
 
         // Order settlement: Transfer tokens between maker and taker
         // 1. Transfer maker asset (WBTC) from maker to taker
