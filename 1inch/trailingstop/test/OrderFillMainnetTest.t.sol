@@ -139,7 +139,10 @@ contract OrderFillMainnetTest is Test {
             lastUpdateAt: block.timestamp,
             updateFrequency: 300,
             maxSlippage: 100, // 1%
-            keeper: address(0)
+            keeper: address(0),
+            orderType: TrailingStopOrder.OrderType.SELL,
+            makerAssetDecimals: 0, // Will be set automatically
+            takerAssetDecimals: 0 // Will be set automatically
         });
 
         vm.prank(maker);
@@ -159,7 +162,7 @@ contract OrderFillMainnetTest is Test {
         TakerTraits takerTraits = TakerTraits.wrap(1 << 251); // _ARGS_HAS_TARGET flag
 
         vm.prank(taker);
-        (uint256 makingAmount, uint256 takingAmount, bytes32 filledOrderHash) = 
+        (uint256 makingAmount, uint256 takingAmount, bytes32 filledOrderHash) =
             limitOrderProtocol.fillOrderArgs(order, r, vs, usdcAmount, takerTraits, interaction);
 
         console.log("Test completed - using real mainnet BTC price:", btcPrice / 1e8, "USD");

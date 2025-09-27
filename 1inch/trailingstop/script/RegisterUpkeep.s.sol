@@ -43,13 +43,13 @@ contract RegisterUpkeepScript is Script {
         if (trailingStopOrderAddress == address(0)) {
             console.log("TRAILING_STOP_ORDER_ADDRESS not set, deploying contracts...");
             vm.startBroadcast(deployerPrivateKey);
-            
+
             // Deploy LimitOrderProtocol first
             // For script deployment, we'll use a mock WETH address
             address mockWETH = address(0x1234567890123456789012345678901234567890); // Mock WETH address
             LimitOrderProtocol limitOrderProtocol = new LimitOrderProtocol(IWETH(mockWETH));
             console.log("LimitOrderProtocol deployed at:", address(limitOrderProtocol));
-            
+
             // Deploy TrailingStopOrder with the deployed LimitOrderProtocol
             TrailingStopOrder trailingStopOrder = new TrailingStopOrder(address(limitOrderProtocol));
             trailingStopOrderAddress = address(trailingStopOrder);

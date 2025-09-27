@@ -117,7 +117,9 @@ contract TrailingStopKeeper is IAutomationCompatible {
                 uint256 lastUpdateAt,
                 uint256 updateFrequency,
                 , // uint256 maxSlippage
-                    // address keeper
+                , // address keeper
+                , // TrailingStopOrder.OrderType orderType
+                , // uint8 makerAssetDecimals
             ) = trailingStopOrder.trailingStopConfigs(orderHashes[i]);
 
             // must be created and update frequency has passed

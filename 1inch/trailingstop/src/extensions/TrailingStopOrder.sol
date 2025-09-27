@@ -11,6 +11,7 @@ import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interf
 // OpenZeppelin imports
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
@@ -45,6 +46,15 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
     error OnlyKeeper();
     error SlippageExceeded();
     error InvalidLimitOrderProtocol();
+    error InvalidOrderType();
+
+    // enums
+
+    enum OrderType {
+        SELL, // Sell order: stop loss when price goes down
+        BUY // Buy order: stop loss when price goes up
+
+    }
 
     // structs
 
@@ -58,6 +68,9 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
         uint256 updateFrequency; // Minimum update frequency (seconds)
         uint256 maxSlippage; // Max slippage in basis points
         address keeper; // Keeper address responsible for executing the trailing stop order
+        OrderType orderType; // Type of order: SELL or BUY
+        uint8 makerAssetDecimals; // Decimals of the maker asset
+        uint8 takerAssetDecimals; // Decimals of the taker asset
     }
 
     // constants
@@ -79,7 +92,11 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
     // events
 
     event TrailingStopConfigUpdated(
-        address indexed maker, address indexed makerAssetOracle, uint256 initialStopPrice, uint256 trailingDistance
+        address indexed maker,
+        address indexed makerAssetOracle,
+        uint256 initialStopPrice,
+        uint256 trailingDistance,
+        OrderType orderType
     );
 
     event TrailingStopUpdated(
@@ -127,6 +144,11 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
             revert InvalidTrailingDistance();
         }
 
+        // Validate order type
+        if (config.orderType != OrderType.SELL && config.orderType != OrderType.BUY) {
+            revert InvalidOrderType();
+        }
+
         TrailingStopConfig storage storedConfig = trailingStopConfigs[orderHash];
         storedConfig.makerAssetOracle = config.makerAssetOracle;
         storedConfig.initialStopPrice = config.initialStopPrice;
@@ -137,18 +159,20 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
         storedConfig.updateFrequency = config.updateFrequency;
         storedConfig.maxSlippage = config.maxSlippage;
         storedConfig.keeper = config.keeper;
+        storedConfig.orderType = config.orderType;
+        
+        // Store decimal information - these will be set when the order is processed
+        // Default to 0, will be updated in takerInteraction when order is filled
+        storedConfig.makerAssetDecimals = 0;
+        storedConfig.takerAssetDecimals = 0;
 
         emit TrailingStopConfigUpdated(
-            maker, address(config.makerAssetOracle), config.initialStopPrice, config.trailingDistance
+            maker, address(config.makerAssetOracle), config.initialStopPrice, config.trailingDistance, config.orderType
         );
     }
 
     function updateTrailingStop(bytes32 orderHash) external whenNotPaused onlyKeeper(orderHash) {
         TrailingStopConfig storage config = trailingStopConfigs[orderHash];
-
-        if (msg.sender != config.keeper) {
-            revert OnlyKeeper();
-        }
 
         // this happens when the order is not configured
         if (config.configuredAt == 0) {
@@ -165,8 +189,8 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
         // Store old stop price for event emission
         uint256 oldStopPrice = config.currentStopPrice;
 
-        // Calculate and update the trailing stop price
-        uint256 newStopPrice = _calculateTrailingStopPrice(currentPrice, config.trailingDistance);
+        // Calculate and update the trailing stop price based on order type
+        uint256 newStopPrice = _calculateTrailingStopPrice(currentPrice, config.trailingDistance, config.orderType);
         config.currentStopPrice = newStopPrice;
         config.lastUpdateAt = block.timestamp;
 
@@ -175,14 +199,15 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
     }
 
     /**
-     * @notice Calculates the new trailing stop price based on current market price
-     * @dev Trailing stop price = currentPrice - (currentPrice * trailingDistance / 10000)
-     * This ensures the stop price follows the market price downward but maintains the trailing distance
+     * @notice Calculates the new trailing stop price based on current market price and order type
+     * @dev For SELL orders: stop price = currentPrice - (currentPrice * trailingDistance / 10000)
+     *      For BUY orders: stop price = currentPrice + (currentPrice * trailingDistance / 10000)
      * @param currentPrice The current market price (18 decimals)
      * @param trailingDistance The trailing distance in basis points (e.g., 200 = 2%)
+     * @param orderType The type of order (SELL or BUY)
      * @return newStopPrice The calculated trailing stop price (18 decimals)
      */
-    function _calculateTrailingStopPrice(uint256 currentPrice, uint256 trailingDistance)
+    function _calculateTrailingStopPrice(uint256 currentPrice, uint256 trailingDistance, OrderType orderType)
         internal
         pure
         returns (uint256)
@@ -190,8 +215,13 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
         // Calculate the trailing amount: currentPrice * trailingDistance / 10000
         uint256 trailingAmount = (currentPrice * trailingDistance) / _SLIPPAGE_DENOMINATOR;
 
-        // New stop price = current price - trailing amount
-        return currentPrice - trailingAmount;
+        if (orderType == OrderType.SELL) {
+            // For sell orders: stop price = current price - trailing amount
+            return currentPrice - trailingAmount;
+        } else {
+            // For buy orders: stop price = current price + trailing amount
+            return currentPrice + trailingAmount;
+        }
     }
 
     /**
@@ -207,6 +237,33 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
         // Chainlink oracles return 8 decimal prices, convert to 18 decimals
         // Multiply by 10^10 to convert from 8 decimals to 18 decimals
         return uint256(answer) * 1e10;
+    }
+
+    /**
+     * @notice Normalizes a price to 18 decimals based on maker and taker asset decimals
+     * @dev This function converts a price from the natural decimals of the assets to 18 decimals
+     * @param takingAmount The taking amount in taker asset decimals
+     * @param makingAmount The making amount in maker asset decimals
+     * @param takerAssetDecimals The decimals of the taker asset
+     * @param makerAssetDecimals The decimals of the maker asset
+     * @return normalizedPrice The price normalized to 18 decimals
+     */
+    function _normalizePrice(
+        uint256 takingAmount,
+        uint256 makingAmount,
+        uint8 takerAssetDecimals,
+        uint8 makerAssetDecimals
+    ) internal pure returns (uint256) {
+        // Calculate the decimal difference needed to normalize to 18 decimals
+        // Price = takingAmount / makingAmount
+        // To normalize to 18 decimals: (takingAmount * 10^(18 - takerDecimals)) / (makingAmount * 10^(18 - makerDecimals))
+        // Simplified: (takingAmount * 10^(18 - takerDecimals + makerDecimals)) / makingAmount
+        
+        // Normalize both amounts to 18 decimals then calculate price
+        uint256 normalizedTakingAmount = takingAmount * (10 ** (18 - takerAssetDecimals));
+        uint256 normalizedMakingAmount = makingAmount * (10 ** (18 - makerAssetDecimals));
+        
+        return (normalizedTakingAmount * 1e18) / normalizedMakingAmount;
     }
 
     /**
@@ -333,13 +390,36 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
 
         // Get current price from Chainlink oracle (18 decimals)
         uint256 currentPrice = _getCurrentPrice(config.makerAssetOracle);
-        if (currentPrice >= config.currentStopPrice) {
+
+        // Check if trailing stop is triggered based on order type
+        bool isTriggered = false;
+        if (config.orderType == OrderType.SELL) {
+            // For sell orders: trigger when current price <= stop price
+            isTriggered = currentPrice <= config.currentStopPrice;
+        } else {
+            // For buy orders: trigger when current price >= stop price
+            isTriggered = currentPrice >= config.currentStopPrice;
+        }
+
+        if (!isTriggered) {
             revert TrailingStopNotTriggered();
         }
 
-        // Calculate expected price: takingAmount (USDC, 6 decimals) / makingAmount (WBTC, 8 decimals)
-        // Normalize to 18 decimals: (takingAmount * 1e12) / makingAmount
-        uint256 expectedPrice = (takingAmount * 1e12) / makingAmount;
+        // Get decimal information from the assets and store them if not already set
+        TrailingStopConfig storage configStorage = trailingStopConfigs[orderHash];
+        if (configStorage.makerAssetDecimals == 0 || configStorage.takerAssetDecimals == 0) {
+            configStorage.makerAssetDecimals = IERC20Metadata(AddressLib.get(order.makerAsset)).decimals();
+            configStorage.takerAssetDecimals = IERC20Metadata(AddressLib.get(order.takerAsset)).decimals();
+        }
+
+        // Calculate expected price using normalized decimals
+        uint256 expectedPrice = _normalizePrice(
+            takingAmount,
+            makingAmount,
+            configStorage.takerAssetDecimals,
+            configStorage.makerAssetDecimals
+        );
+        
         uint256 slippage = _calculateSlippage(expectedPrice, currentPrice);
         if (slippage > config.maxSlippage) {
             revert SlippageExceeded();
