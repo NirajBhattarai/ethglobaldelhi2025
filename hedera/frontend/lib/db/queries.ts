@@ -1,5 +1,7 @@
 import "server-only";
 
+import type { ArtifactKind } from "@/components/artifact";
+import type { VisibilityType } from "@/components/visibility-selector";
 import {
   and,
   asc,
@@ -14,8 +16,6 @@ import {
 } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import type { ArtifactKind } from "@/components/artifact";
-import type { VisibilityType } from "@/components/visibility-selector";
 import { ChatSDKError } from "../errors";
 import type { AppUsage } from "../usage";
 import { generateUUID } from "../utils";
@@ -25,8 +25,8 @@ import {
   type DBMessage,
   document,
   message,
-  type Suggestion,
   stream,
+  type Suggestion,
   suggestion,
   type User,
   user,
@@ -41,6 +41,43 @@ import { generateHashedPassword } from "./utils";
 // biome-ignore lint: Forbidden non-null assertion.
 const client = postgres(process.env.POSTGRES_URL!);
 const db = drizzle(client);
+
+export async function getUserByWalletAddress(
+  walletAddress: string,
+): Promise<Array<User>> {
+  try {
+    return await db
+      .select()
+      .from(user)
+      .where(eq(user.walletAddress, walletAddress));
+  } catch (error) {
+    throw new ChatSDKError(
+      'bad_request:database',
+      'Failed to get user by wallet address',
+    );
+  }
+}
+
+export async function createWalletUser(walletAddress: string) {
+  try {
+    return await db
+      .insert(user)
+      .values({
+        walletAddress,
+        authType: 'wallet',
+      })
+      .returning({
+        id: user.id,
+        walletAddress: user.walletAddress,
+        authType: user.authType,
+      });
+  } catch (error) {
+    throw new ChatSDKError(
+      'bad_request:database',
+      'Failed to create wallet user',
+    );
+  }
+}
 
 export async function getUser(email: string): Promise<User[]> {
   try {

@@ -1,12 +1,13 @@
+import { authenticateWalletUser } from "@/lib/auth/wallet-auth";
+import { DUMMY_PASSWORD } from "@/lib/constants";
+import { createGuestUser, getUser, getUserByWalletAddress } from "@/lib/db/queries";
 import { compare } from "bcrypt-ts";
 import NextAuth, { type DefaultSession } from "next-auth";
 import type { DefaultJWT } from "next-auth/jwt";
 import Credentials from "next-auth/providers/credentials";
-import { DUMMY_PASSWORD } from "@/lib/constants";
-import { createGuestUser, getUser } from "@/lib/db/queries";
 import { authConfig } from "./auth.config";
 
-export type UserType = "guest" | "regular";
+export type UserType = "guest" | "regular" | "wallet";
 
 declare module "next-auth" {
   interface Session extends DefaultSession {
@@ -20,6 +21,7 @@ declare module "next-auth" {
   interface User {
     id?: string;
     email?: string | null;
+    walletAddress?: string | null;
     type: UserType;
   }
 }
@@ -39,30 +41,29 @@ export const {
 } = NextAuth({
   ...authConfig,
   providers: [
-    Credentials({
+     Credentials({
+      id: 'wallet',
       credentials: {},
-      async authorize({ email, password }: any) {
-        const users = await getUser(email);
-
-        if (users.length === 0) {
-          await compare(password, DUMMY_PASSWORD);
+      async authorize({ address, signature, message }: any) {
+        if (!address || !signature || !message) {
           return null;
         }
 
-        const [user] = users;
+        const user = await authenticateWalletUser({
+          address,
+          signature,
+          message,
+        });
 
-        if (!user.password) {
-          await compare(password, DUMMY_PASSWORD);
+        if (!user) {
           return null;
         }
 
-        const passwordsMatch = await compare(password, user.password);
-
-        if (!passwordsMatch) {
-          return null;
-        }
-
-        return { ...user, type: "regular" };
+        return {
+          id: user.id,
+          walletAddress: user.walletAddress,
+          type: 'wallet',
+        };
       },
     }),
     Credentials({
