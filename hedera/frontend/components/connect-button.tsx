@@ -1,6 +1,7 @@
 'use client';
 import { toast } from '@/components/toast';
 import { Button } from '@/components/ui/button';
+import { clearUserSession } from '@/lib/auth/session-actions';
 import {
   clearWalletAddress,
   setAuthenticated,
@@ -33,9 +34,10 @@ export default function ConnectButton() {
       // User is authenticated via wallet, sync Redux state
       dispatch(setWalletAddress(session.user.walletAddress));
       dispatch(setAuthenticated(true));
-    } else if (sessionStatus === 'unauthenticated') {
+    } else if (sessionStatus === 'unauthenticated' || !session) {
       // No session, clear Redux state
       dispatch(clearWalletAddress());
+      dispatch(setAuthenticated(false));
     }
   }, [session, sessionStatus, dispatch]);
 
@@ -45,6 +47,7 @@ export default function ConnectButton() {
       dispatch(setWalletAddress(address));
     } else if (!isConnected) {
       dispatch(clearWalletAddress());
+      dispatch(setAuthenticated(false));
     }
   }, [isConnected, address, dispatch]);
 
@@ -184,17 +187,26 @@ export default function ConnectButton() {
           variant="outline"
           size="sm"
           onClick={async () => {
-            // Disconnect wallet
-            disconnect();
-            // Clear wallet address from Redux
-            dispatch(clearWalletAddress());
             try {
-             
-            } catch {}
-            // Sign out from NextAuth session
-            await signOut({ redirect: false });
-            // Redirect to homepage and replace history to prevent going back
-            router.replace('/');
+              // Disconnect wallet
+              disconnect();
+              // Clear wallet address and authentication state from Redux
+              dispatch(clearWalletAddress());
+              dispatch(setAuthenticated(false));
+              // Sign out from NextAuth session without redirect
+              await signOut({ redirect: false });
+              // Clear server-side session and revalidate paths
+              await clearUserSession();
+              // Navigate without full page reload
+              router.replace('/');
+            } catch (error) {
+              console.error('Error during disconnect:', error);
+              // Still try to clear local state even if signOut fails
+              dispatch(clearWalletAddress());
+              dispatch(setAuthenticated(false));
+              // Fallback to manual redirect
+              router.replace('/');
+            }
           }}
         >
           Disconnect

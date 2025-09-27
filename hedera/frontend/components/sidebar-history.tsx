@@ -1,12 +1,5 @@
 "use client";
 
-import { isToday, isYesterday, subMonths, subWeeks } from "date-fns";
-import { motion } from "framer-motion";
-import { useParams, useRouter } from "next/navigation";
-import type { User } from "next-auth";
-import { useState } from "react";
-import { toast } from "sonner";
-import useSWRInfinite from "swr/infinite";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -25,6 +18,14 @@ import {
 } from "@/components/ui/sidebar";
 import type { Chat } from "@/lib/db/schema";
 import { fetcher } from "@/lib/utils";
+import { isToday, isYesterday, subMonths, subWeeks } from "date-fns";
+import { motion } from "framer-motion";
+import type { User } from "next-auth";
+import { useSession } from "next-auth/react";
+import { useParams, useRouter } from "next/navigation";
+import { useState } from "react";
+import { toast } from "sonner";
+import useSWRInfinite from "swr/infinite";
 import { LoaderIcon } from "./icons";
 import { ChatItem } from "./sidebar-history-item";
 
@@ -100,6 +101,19 @@ export function getChatHistoryPaginationKey(
 export function SidebarHistory({ user }: { user: User | undefined }) {
   const { setOpenMobile } = useSidebar();
   const { id } = useParams();
+  const { data: session, status } = useSession();
+
+  // Use client-side session if server-side user is not available
+  // Prioritize client-side session status over server-side user prop
+  // If session status is unauthenticated, ignore the server-side user prop
+  // Also check if session is loading to avoid showing stale data
+  const currentUser = status === 'unauthenticated' || status === 'loading' ? null : (session?.user || user);
+  
+  // Debug logging
+  console.log('SidebarHistory - user prop:', user);
+  console.log('SidebarHistory - session:', session);
+  console.log('SidebarHistory - status:', status);
+  console.log('SidebarHistory - currentUser:', currentUser);
 
   const {
     data: paginatedChatHistories,
@@ -152,7 +166,7 @@ export function SidebarHistory({ user }: { user: User | undefined }) {
     }
   };
 
-  if (!user) {
+  if (!currentUser) {
     return (
       <SidebarGroup>
         <SidebarGroupContent>
