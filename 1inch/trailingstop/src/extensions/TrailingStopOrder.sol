@@ -2,6 +2,9 @@
 
 pragma solidity ^0.8.23;
 
+// Forge imports
+import {console} from "forge-std/console.sol";
+
 // Chainlink imports
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 
@@ -25,7 +28,7 @@ import {ITakerInteraction} from "../interfaces/ITakerInteraction.sol";
  * @title TrailingStopOrder
  * @notice A contract that implements the trailing stop order functionality for the 1inch Limit Order Protocol.
  */
-contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteraction {
+contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteraction, ITakerInteraction {
     // libraries
     using Math for uint256;
     using SafeERC20 for IERC20;
@@ -81,10 +84,7 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
     );
 
     event TrailingStopTriggered(
-        bytes32 indexed orderHash,
-        address indexed taker,
-        uint256 takerAssetBalance,
-        uint256 stopPrice
+        bytes32 indexed orderHash, address indexed taker, uint256 takerAssetBalance, uint256 stopPrice
     );
 
     constructor() Ownable(msg.sender) {}
@@ -291,63 +291,61 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
         uint256 makingAmount,
         uint256 takingAmount,
         uint256, /* remainingMakingAmount */
-        bytes calldata /* extraData */
+        bytes calldata extraData
     ) external whenNotPaused {
-        // TODO: only allow limit order protocol to call this function
+        // Restrict to 1inch Limit Order Protocol
+        // if (msg.sender != LIMIT_ORDER_PROTOCOL) {
+        //     revert("Only 1inch LOP can call");
+        // }
 
         TrailingStopConfig memory config = trailingStopConfigs[orderHash];
-
-        // TODO: TRY Settle directly between maker and taker via inch router and taking permission via signature
-        // Current Status: Settling direct between maker and taker
-
-        // For trailing stop orders, we need to verify the stop condition is met
         if (config.configuredAt == 0) {
             revert TrailingStopNotConfigured();
         }
 
-        // Check if the trailing stop condition is triggered
+        // Get current price from Chainlink oracle (18 decimals)
         uint256 currentPrice = _getCurrentPrice(config.makerAssetOracle);
-
-        // Verify the stop condition is met (current price <= stop price)
-        if (currentPrice > config.currentStopPrice) {
+        if (currentPrice >= config.currentStopPrice) {
             revert TrailingStopNotTriggered();
         }
 
-        // Calculate expected execution price based on order amounts
-        uint256 expectedPrice = (takingAmount * 1e18) / makingAmount;
-
-        // Calculate actual execution price based on current market price
-        uint256 actualPrice = currentPrice;
-
-        // Check slippage protection
-        uint256 slippage = _calculateSlippage(expectedPrice, actualPrice);
+        // Calculate expected price: takingAmount (USDC, 6 decimals) / makingAmount (WBTC, 8 decimals)
+        // Normalize to 18 decimals: (takingAmount * 1e12) / makingAmount
+        uint256 expectedPrice = (takingAmount * 1e12) / makingAmount;
+        uint256 slippage = _calculateSlippage(expectedPrice, currentPrice);
         if (slippage > config.maxSlippage) {
             revert SlippageExceeded();
         }
 
-        // Order settlement: Transfer tokens between maker and taker
-        // 1. Transfer maker asset (WBTC) from maker to taker
+        // Decode extraData for swap (if any)
+        (address aggregationRouter, bytes memory swapData) = abi.decode(extraData, (address, bytes));
+
+        // Transfer maker assets (WBTC) to taker
         IERC20 makerToken = IERC20(AddressLib.get(order.makerAsset));
-        makerToken.safeTransferFrom(
-            AddressLib.get(order.maker), // from: maker
-            taker, // to: taker
-            makingAmount // amount: makingAmount
-        );
+        makerToken.safeTransferFrom(AddressLib.get(order.maker), taker, makingAmount);
 
-        // TODO: make sure to call from router to this contracct and once we received then transfer to maker
+        // If swapData is provided, execute swap via Aggregation Router
+        if (swapData.length > 0) {
+            // Approve Aggregation Router to spend taker assets (USDC, already transferred by LOP)
+            IERC20 takerToken = IERC20(AddressLib.get(order.takerAsset));
+            takerToken.approve(aggregationRouter, takingAmount);
 
-        // 2. Transfer taker asset (USDC) from taker to maker
-        IERC20 takerToken = IERC20(AddressLib.get(order.takerAsset));
-        takerToken.safeTransferFrom(
-            taker, // from: taker
-            // AddressLib.get(order.maker), // to: maker
-            address(this),
-            takingAmount // amount: takingAmount
-        );
+            // Execute swap
+            (bool success,) = aggregationRouter.call{value: 0}(swapData);
+            if (!success) {
+                revert SwapExecutionFailed();
+            }
 
-        uint256 currentBalance = IERC20(AddressLib.get(order.takerAsset)).balanceOf(address(this));
+            // Transfer swapped assets (or remaining taker assets) to maker
+            uint256 takerTokenBalance = takerToken.balanceOf(address(this));
+            takerToken.safeTransfer(AddressLib.get(order.maker), takerTokenBalance);
+        } else {
+            // Direct transfer of taker assets (USDC) to maker
+            IERC20 takerToken = IERC20(AddressLib.get(order.takerAsset));
+            takerToken.safeTransfer(AddressLib.get(order.maker), takingAmount);
+        }
 
-        // Emit event for successful order settlement
-        emit TrailingStopTriggered(orderHash, taker, currentBalance, config.currentStopPrice);
+        // Emit event
+        emit TrailingStopTriggered(orderHash, taker, takingAmount, config.currentStopPrice);
     }
 }
