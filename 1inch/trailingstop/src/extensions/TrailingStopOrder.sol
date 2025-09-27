@@ -80,12 +80,11 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
         bytes32 indexed orderHash, uint256 oldStopPrice, uint256 newStopPrice, uint256 currentPrice, address updater
     );
 
-    event OrderSettled(
+    event TrailingStopTriggered(
         bytes32 indexed orderHash,
-        address indexed maker,
         address indexed taker,
-        uint256 makingAmount,
-        uint256 takingAmount
+        uint256 takerAssetBalance,
+        uint256 stopPrice
     );
 
     constructor() Ownable(msg.sender) {}
@@ -294,6 +293,8 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
         uint256, /* remainingMakingAmount */
         bytes calldata /* extraData */
     ) external whenNotPaused {
+        // TODO: only allow limit order protocol to call this function
+
         TrailingStopConfig memory config = trailingStopConfigs[orderHash];
 
         // TODO: TRY Settle directly between maker and taker via inch router and taking permission via signature
@@ -333,15 +334,20 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
             makingAmount // amount: makingAmount
         );
 
+        // TODO: make sure to call from router to this contracct and once we received then transfer to maker
+
         // 2. Transfer taker asset (USDC) from taker to maker
         IERC20 takerToken = IERC20(AddressLib.get(order.takerAsset));
         takerToken.safeTransferFrom(
             taker, // from: taker
-            AddressLib.get(order.maker), // to: maker
+            // AddressLib.get(order.maker), // to: maker
+            address(this),
             takingAmount // amount: takingAmount
         );
 
+        uint256 currentBalance = IERC20(AddressLib.get(order.takerAsset)).balanceOf(address(this));
+
         // Emit event for successful order settlement
-        emit OrderSettled(orderHash, AddressLib.get(order.maker), taker, makingAmount, takingAmount);
+        emit TrailingStopTriggered(orderHash, taker, currentBalance, config.currentStopPrice);
     }
 }
