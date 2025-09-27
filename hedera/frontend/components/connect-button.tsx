@@ -74,7 +74,19 @@ export default function ConnectButton() {
       } else {
         throw new Error(result.error || 'Authentication failed');
       }
-    } catch (error) {
+    }catch (error: any) {
+      // Check if user rejected the signature request
+      if (
+        error?.cause?.code === 4001 ||
+        error?.code === 4001 ||
+        error?.message?.includes('User rejected') ||
+        error?.message?.includes('not been authorized')
+      ) {
+        console.log('User rejected signature request');
+        // Don't show error toast for user rejection
+        disconnect();
+        return;
+      }
       const errorMessage =
         error instanceof Error ? error.message : 'Sign in failed';
       toast({
