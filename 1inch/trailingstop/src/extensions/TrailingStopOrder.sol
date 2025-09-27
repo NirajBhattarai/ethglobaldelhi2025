@@ -37,6 +37,7 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
     error TrailingStopNotConfigured();
     error InvalidUpdateFrequency();
     error TrailingStopNotTriggered();
+    error SwapExecutionFailed();
 
     // structs
 
@@ -269,5 +270,39 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
 
         //
         makerToken.safeIncreaseAllowance(aggregationRouter, makingAmount);
+
+        // https://etherscan.io/address/0x1111111254eeb25477b68fb85ed929f73a960582
+        // implemenation of 1inch aggregation router
+
+        /**
+         * @notice Executes swap via 1inch AggregationRouterV5
+         * @dev Function selector determines which function is called:
+         *      - First 4 bytes of swapData contain the function selector
+         *      - Most common: swap(IAggregationExecutor, SwapDescription, bytes, bytes)
+         *        with selector 0x12aa3caf
+         *
+         * @dev Execution flow:
+         *      1. Router validates swap parameters and ETH value
+         *      2. Transfers tokens from sender to router (if not ETH)
+         *      3. Calls executor.execute() with swap data
+         *      4. Executor performs actual swap (Uniswap, Curve, etc.)
+         *      5. Returns spentAmount and returnAmount
+         *
+         * @dev swapData breakdown example:
+         *      0x12aa3caf0000000000000000000000001111111254eeb25477b68fb85ed929f73a960582
+         *      ^^^^^^^^^ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+         *      selector   executor address (20 bytes)
+         *
+         *      + SwapDescription struct (srcToken, dstToken, amounts, flags, etc.)
+         *      + permit data (if needed)
+         *      + executor-specific swap parameters
+         *
+         * @dev {value: 0} means no ETH sent - token-to-token swap
+         * @dev Call will revert if swap fails or returns insufficient amount
+         */
+        (bool success, bytes memory result) = aggregationRouter.call{value: 0}(swapData);
+        if (!success) {
+            revert SwapExecutionFailed();
+        }
     }
 }
