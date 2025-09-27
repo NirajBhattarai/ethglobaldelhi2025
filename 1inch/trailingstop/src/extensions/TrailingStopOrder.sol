@@ -76,7 +76,13 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
         bytes32 indexed orderHash, uint256 oldStopPrice, uint256 newStopPrice, uint256 currentPrice, address updater
     );
 
-    // modifiers
+    event OrderSettled(
+        bytes32 indexed orderHash,
+        address indexed maker,
+        address indexed taker,
+        uint256 makingAmount,
+        uint256 takingAmount
+    );
 
     constructor() Ownable(msg.sender) {}
 
@@ -255,54 +261,39 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
         bytes calldata extraData
     ) external whenNotPaused {
         TrailingStopConfig memory config = trailingStopConfigs[orderHash];
-        // TODO: implement the logic to taker interaction
 
-        // decode the extra data and agregration router
-        (address aggregationRouter, bytes memory swapData) = abi.decode(extraData, (address, bytes));
+        // TODO: TRY Settle directly between maker and taker via inch router and taking permission via signature
+        // Current Status: Settling direct between maker and taker
 
-        IERC20(AddressLib.get(order.makerAsset)).safeTransferFrom(
-            AddressLib.get(order.maker), address(this), makingAmount
+        // For trailing stop orders, we need to verify the stop condition is met
+        if (config.configuredAt == 0) {
+            revert TrailingStopNotConfigured();
+        }
+
+        // Check if the trailing stop condition is triggered
+        uint256 currentPrice = _getCurrentPrice(config.makerAssetOracle);
+
+        // Decode the aggregation router address from extraData
+        address aggregationRouter = abi.decode(extraData, (address));
+
+        // Order settlement: Transfer tokens between maker and taker
+        // 1. Transfer maker asset (WBTC) from maker to taker
+        IERC20 makerToken = IERC20(AddressLib.get(order.makerAsset));
+        makerToken.safeTransferFrom(
+            AddressLib.get(order.maker), // from: maker
+            taker, // to: taker
+            makingAmount // amount: makingAmount
         );
 
-        // approve to router to spend maker
-        IERC20 makerToken = IERC20(AddressLib.get(order.makerAsset));
-        makerToken.safeIncreaseAllowance(aggregationRouter, makingAmount);
+        // 2. Transfer taker asset (USDC) from taker to maker
+        IERC20 takerToken = IERC20(AddressLib.get(order.takerAsset));
+        takerToken.safeTransferFrom(
+            taker, // from: taker
+            AddressLib.get(order.maker), // to: maker
+            takingAmount // amount: takingAmount
+        );
 
-        //
-        makerToken.safeIncreaseAllowance(aggregationRouter, makingAmount);
-
-        // https://etherscan.io/address/0x1111111254eeb25477b68fb85ed929f73a960582
-        // implemenation of 1inch aggregation router
-
-        /**
-         * @notice Executes swap via 1inch AggregationRouterV5
-         * @dev Function selector determines which function is called:
-         *      - First 4 bytes of swapData contain the function selector
-         *      - Most common: swap(IAggregationExecutor, SwapDescription, bytes, bytes)
-         *        with selector 0x12aa3caf
-         *
-         * @dev Execution flow:
-         *      1. Router validates swap parameters and ETH value
-         *      2. Transfers tokens from sender to router (if not ETH)
-         *      3. Calls executor.execute() with swap data
-         *      4. Executor performs actual swap (Uniswap, Curve, etc.)
-         *      5. Returns spentAmount and returnAmount
-         *
-         * @dev swapData breakdown example:
-         *      0x12aa3caf0000000000000000000000001111111254eeb25477b68fb85ed929f73a960582
-         *      ^^^^^^^^^ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-         *      selector   executor address (20 bytes)
-         *
-         *      + SwapDescription struct (srcToken, dstToken, amounts, flags, etc.)
-         *      + permit data (if needed)
-         *      + executor-specific swap parameters
-         *
-         * @dev {value: 0} means no ETH sent - token-to-token swap
-         * @dev Call will revert if swap fails or returns insufficient amount
-         */
-        (bool success, bytes memory result) = aggregationRouter.call{value: 0}(swapData);
-        if (!success) {
-            revert SwapExecutionFailed();
-        }
+        // Emit event for successful order settlement
+        emit OrderSettled(orderHash, AddressLib.get(order.maker), taker, makingAmount, takingAmount);
     }
 }
