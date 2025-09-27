@@ -1,8 +1,15 @@
 'use client';
-
 import { toast } from '@/components/toast';
 import { Button } from '@/components/ui/button';
-import { signIn } from 'next-auth/react';
+import {
+  clearWalletAddress,
+  setAuthenticated,
+  setWalletAddress,
+} from '@/lib/store/features/userAccountDetailsSlice';
+import { useAppDispatch, useAppSelector } from '@/lib/store/hooks';
+import { CopyIcon } from 'lucide-react';
+import { signIn, signOut, useSession } from 'next-auth/react';
+import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { useAccount, useDisconnect, useSignMessage } from 'wagmi';
 
@@ -10,15 +17,57 @@ export default function ConnectButton() {
   const { address, isConnected } = useAccount();
   const { disconnect } = useDisconnect();
   const { signMessageAsync } = useSignMessage();
+  const { data: session, status: sessionStatus } = useSession();
+  const dispatch = useAppDispatch();
+  const router = useRouter();
+  const isAuthenticated = useAppSelector(
+    (state) => (state.userAccountDetails as any).isAuthenticated,
+  );
   const [isSigning, setIsSigning] = useState(false);
-  const [hasSigned, setHasSigned] = useState(false);
 
-  // Auto-trigger sign message when wallet connects
+  // Sync Redux state with NextAuth session on mount and session changes
   useEffect(() => {
-    if (isConnected && address && !hasSigned && !isSigning) {
+    if (sessionStatus === 'loading') return; // Wait for session to load
+
+    if (session?.user?.type === 'wallet' && session.user.walletAddress) {
+      // User is authenticated via wallet, sync Redux state
+      dispatch(setWalletAddress(session.user.walletAddress));
+      dispatch(setAuthenticated(true));
+    } else if (sessionStatus === 'unauthenticated') {
+      // No session, clear Redux state
+      dispatch(clearWalletAddress());
+    }
+  }, [session, sessionStatus, dispatch]);
+
+  // Update Redux store when wallet connects/disconnects
+  useEffect(() => {
+    if (isConnected && address) {
+      dispatch(setWalletAddress(address));
+    } else if (!isConnected) {
+      dispatch(clearWalletAddress());
+    }
+  }, [isConnected, address, dispatch]);
+
+  // Auto-trigger sign message when wallet connects (only if not already authenticated)
+  useEffect(() => {
+    if (
+      isConnected &&
+      address &&
+      !isAuthenticated &&
+      !isSigning &&
+      sessionStatus !== 'loading' &&
+      session?.user?.type !== 'wallet'
+    ) {
       handleWalletSignIn();
     }
-  }, [isConnected, address, hasSigned, isSigning]);
+  }, [
+    isConnected,
+    address,
+    isAuthenticated,
+    isSigning,
+    sessionStatus,
+    session,
+  ]);
 
   const handleWalletSignIn = async () => {
     if (!isConnected || !address) {
@@ -26,11 +75,11 @@ export default function ConnectButton() {
     }
 
     setIsSigning(true);
-
     try {
-      // Generate a unique nonce and message
-      const nonce = Math.random().toString(36).substring(2, 15);
-      const message = `Sign this message to authenticate with HederaAI Chatbot.\n\nWallet: ${address}\nNonce: ${nonce}\nTimestamp: ${Date.now()}`;
+      // Generate a unique nonce and message using deterministic approach
+      const nonce = address.slice(2, 15); // Use wallet address as base for nonce
+      const timestamp = Date.now();
+      const message = `Sign this message to authenticate with HederaAI Chatbot.\n\nWallet: ${address}\nNonce: ${nonce}\nTimestamp: ${timestamp}`;
 
       // Request signature from user
       const signature = await signMessageAsync({
@@ -70,11 +119,11 @@ export default function ConnectButton() {
           description: 'Successfully authenticated with wallet!',
         });
 
-        setHasSigned(true);
+        dispatch(setAuthenticated(true));
       } else {
         throw new Error(result.error || 'Authentication failed');
       }
-    }catch (error: any) {
+    } catch (error: any) {
       // Check if user rejected the signature request
       if (
         error?.cause?.code === 4001 ||
@@ -99,14 +148,27 @@ export default function ConnectButton() {
   };
 
   if (isConnected) {
+    const handleCopyAddress = () => {
+      if (address) {
+        navigator.clipboard.writeText(address);
+        toast({
+          type: 'success',
+          description: 'Address copied to clipboard!',
+        });
+      }
+    };
+
     return (
       <div className="flex items-center gap-2">
         <span className="text-sm text-muted-foreground">
           {address?.slice(0, 6)}...{address?.slice(-4)}
         </span>
+        <Button variant="ghost" size="icon" onClick={handleCopyAddress}>
+          <CopyIcon className="size-4" />
+        </Button>
         {isSigning ? (
           <span className="text-xs text-muted-foreground">Signing...</span>
-        ) : hasSigned ? (
+        ) : isAuthenticated ? (
           <span className="text-xs text-green-600">✓ Authenticated</span>
         ) : (
           <Button
@@ -121,9 +183,18 @@ export default function ConnectButton() {
         <Button
           variant="outline"
           size="sm"
-          onClick={() => {
-            setHasSigned(false);
+          onClick={async () => {
+            // Disconnect wallet
             disconnect();
+            // Clear wallet address from Redux
+            dispatch(clearWalletAddress());
+            try {
+             
+            } catch {}
+            // Sign out from NextAuth session
+            await signOut({ redirect: false });
+            // Redirect to homepage and replace history to prevent going back
+            router.replace('/');
           }}
         >
           Disconnect

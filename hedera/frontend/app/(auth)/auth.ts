@@ -30,6 +30,7 @@ declare module "next-auth/jwt" {
   interface JWT extends DefaultJWT {
     id: string;
     type: UserType;
+     walletAddress?: string;
   }
 }
 
@@ -80,6 +81,9 @@ export const {
       if (user) {
         token.id = user.id as string;
         token.type = user.type;
+        if (user.walletAddress) {
+          token.walletAddress = user.walletAddress;
+        }
       }
 
       return token;
@@ -88,6 +92,9 @@ export const {
       if (session.user) {
         session.user.id = token.id;
         session.user.type = token.type;
+        if (token.walletAddress) {
+          session.user.walletAddress = token.walletAddress;
+        }
       }
 
       return session;
