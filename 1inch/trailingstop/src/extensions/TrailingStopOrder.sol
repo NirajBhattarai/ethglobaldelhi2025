@@ -56,6 +56,7 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, ReentrancyGua
     error InvalidPriceHistory();
     error UnauthorizedCaller();
     error InvalidAggregationRouter();
+    error InvalidTokenDecimals();
 
     // enums
 
@@ -442,8 +443,8 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, ReentrancyGua
     function _validatePriceDeviation(bytes32 orderHash, uint256 currentPrice, uint256 maxDeviation) internal view {
         if (maxDeviation == 0) {
             // If max deviation is 0, any price change should be rejected
-            uint256 twapPrice = _getTWAPPrice(orderHash);
-            if (twapPrice != 0 && currentPrice != twapPrice) {
+            uint256 twapPriceZero = _getTWAPPrice(orderHash);
+            if (twapPriceZero != 0 && currentPrice != twapPriceZero) {
                 revert PriceDeviationTooHigh();
             }
             return;
@@ -742,8 +743,8 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, ReentrancyGua
     }
 
     /**
-     * @notice Calculates making amount with proper decimal handling
-     * @dev Converts taking amount to making amount based on current price
+     * @notice Calculates making amount with enhanced decimal handling and precision
+     * @dev Converts taking amount to making amount based on current price using Math.mulDiv for precision
      * @param takingAmount The amount being taken (in taker asset decimals)
      * @param currentPrice The current market price (18 decimals)
      * @param config The trailing stop configuration
@@ -754,30 +755,29 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, ReentrancyGua
         uint256 currentPrice,
         TrailingStopConfig memory config
     ) internal pure returns (uint256) {
-        // Normalize taking amount to 18 decimals
-        uint256 normalizedTakingAmount = takingAmount;
-        if (config.takerAssetDecimals < 18) {
-            normalizedTakingAmount = takingAmount * (10 ** (18 - config.takerAssetDecimals));
-        } else if (config.takerAssetDecimals > 18) {
-            normalizedTakingAmount = takingAmount / (10 ** (config.takerAssetDecimals - 18));
+        // Validate inputs
+        if (takingAmount == 0 || currentPrice == 0) {
+            return 0;
         }
+        
+        // Validate decimal configurations
+        _validateTokenDecimals(config.takerAssetDecimals);
+        _validateTokenDecimals(config.makerAssetDecimals);
 
-        // Calculate making amount in 18 decimals: takingAmount / currentPrice
-        uint256 makingAmount18 = (normalizedTakingAmount * 1e18) / currentPrice;
+        // Normalize taking amount to 18 decimals
+        uint256 normalizedTakingAmount = _normalizeTo18Decimals(takingAmount, config.takerAssetDecimals);
+
+        // Calculate making amount in 18 decimals using Math.mulDiv for precision
+        // Formula: makingAmount = (takingAmount * 1e18) / currentPrice
+        uint256 makingAmount18 = Math.mulDiv(normalizedTakingAmount, 1e18, currentPrice);
 
         // Convert back to maker asset decimals
-        if (config.makerAssetDecimals < 18) {
-            return makingAmount18 / (10 ** (18 - config.makerAssetDecimals));
-        } else if (config.makerAssetDecimals > 18) {
-            return makingAmount18 * (10 ** (config.makerAssetDecimals - 18));
-        }
-
-        return makingAmount18;
+        return _convertFrom18Decimals(makingAmount18, config.makerAssetDecimals);
     }
 
     /**
-     * @notice Calculates taking amount with proper decimal handling
-     * @dev Converts making amount to taking amount based on current price
+     * @notice Calculates taking amount with enhanced decimal handling and precision
+     * @dev Converts making amount to taking amount based on current price using Math.mulDiv for precision
      * @param makingAmount The amount being made (in maker asset decimals)
      * @param currentPrice The current market price (18 decimals)
      * @param config The trailing stop configuration
@@ -788,25 +788,80 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, ReentrancyGua
         uint256 currentPrice,
         TrailingStopConfig memory config
     ) internal pure returns (uint256) {
-        // Normalize making amount to 18 decimals
-        uint256 normalizedMakingAmount = makingAmount;
-        if (config.makerAssetDecimals < 18) {
-            normalizedMakingAmount = makingAmount * (10 ** (18 - config.makerAssetDecimals));
-        } else if (config.makerAssetDecimals > 18) {
-            normalizedMakingAmount = makingAmount / (10 ** (config.makerAssetDecimals - 18));
+        // Validate inputs
+        if (makingAmount == 0 || currentPrice == 0) {
+            return 0;
         }
+        
+        // Validate decimal configurations
+        _validateTokenDecimals(config.makerAssetDecimals);
+        _validateTokenDecimals(config.takerAssetDecimals);
 
-        // Calculate taking amount in 18 decimals: makingAmount * currentPrice
-        uint256 takingAmount18 = (normalizedMakingAmount * currentPrice) / 1e18;
+        // Normalize making amount to 18 decimals
+        uint256 normalizedMakingAmount = _normalizeTo18Decimals(makingAmount, config.makerAssetDecimals);
+
+        // Calculate taking amount in 18 decimals using Math.mulDiv for precision
+        // Formula: takingAmount = (makingAmount * currentPrice) / 1e18
+        uint256 takingAmount18 = Math.mulDiv(normalizedMakingAmount, currentPrice, 1e18);
 
         // Convert back to taker asset decimals
-        if (config.takerAssetDecimals < 18) {
-            return takingAmount18 / (10 ** (18 - config.takerAssetDecimals));
-        } else if (config.takerAssetDecimals > 18) {
-            return takingAmount18 * (10 ** (config.takerAssetDecimals - 18));
-        }
+        return _convertFrom18Decimals(takingAmount18, config.takerAssetDecimals);
+    }
 
-        return takingAmount18;
+    // ============ Decimal Handling Helper Functions ============
+
+    /**
+     * @notice Normalizes an amount to 18 decimals with overflow protection
+     * @param amount The amount to normalize
+     * @param decimals The current decimal places of the amount
+     * @return normalizedAmount The amount normalized to 18 decimals
+     */
+    function _normalizeTo18Decimals(uint256 amount, uint8 decimals) internal pure returns (uint256) {
+        if (decimals == 18) {
+            return amount;
+        } else if (decimals < 18) {
+            uint256 scaleFactor = 10 ** (18 - decimals);
+            // Check for overflow before multiplication
+            if (amount > type(uint256).max / scaleFactor) {
+                revert InvalidTokenDecimals();
+            }
+            return amount * scaleFactor;
+        } else {
+            uint256 scaleFactor = 10 ** (decimals - 18);
+            return amount / scaleFactor;
+        }
+    }
+
+    /**
+     * @notice Converts an amount from 18 decimals to target decimals with overflow protection
+     * @param amount18 The amount in 18 decimals
+     * @param targetDecimals The target decimal places
+     * @return convertedAmount The amount converted to target decimals
+     */
+    function _convertFrom18Decimals(uint256 amount18, uint8 targetDecimals) internal pure returns (uint256) {
+        if (targetDecimals == 18) {
+            return amount18;
+        } else if (targetDecimals < 18) {
+            uint256 scaleFactor = 10 ** (18 - targetDecimals);
+            return amount18 / scaleFactor;
+        } else {
+            uint256 scaleFactor = 10 ** (targetDecimals - 18);
+            // Check for overflow before multiplication
+            if (amount18 > type(uint256).max / scaleFactor) {
+                revert InvalidTokenDecimals();
+            }
+            return amount18 * scaleFactor;
+        }
+    }
+
+    /**
+     * @notice Validates decimal configuration for tokens
+     * @param decimals The decimal places to validate
+     */
+    function _validateTokenDecimals(uint8 decimals) internal pure {
+        if (decimals > 18) {
+            revert InvalidTokenDecimals();
+        }
     }
 
     // ============ External View Functions ============
