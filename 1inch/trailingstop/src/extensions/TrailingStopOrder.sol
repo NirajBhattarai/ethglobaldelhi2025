@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity 0.8.23;
+pragma solidity ^0.8.23;
 
 import {AmountGetterBase} from "./AmountGetterBase.sol";
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
@@ -103,15 +103,15 @@ contract TrailingStopOrder is AmountGetterBase, Pausable {
         }
 
         uint256 currentPrice = _getCurrentPrice(config.makerAssetOracle);
-        
+
         // Store old stop price for event emission
         uint256 oldStopPrice = config.currentStopPrice;
-        
+
         // Calculate and update the trailing stop price
         uint256 newStopPrice = _calculateTrailingStopPrice(currentPrice, config.trailingDistance);
         config.currentStopPrice = newStopPrice;
         config.lastUpdateAt = block.timestamp;
-        
+
         // Emit event for tracking trailing stop updates
         emit TrailingStopUpdated(orderHash, oldStopPrice, newStopPrice, currentPrice, msg.sender);
     }
@@ -124,10 +124,14 @@ contract TrailingStopOrder is AmountGetterBase, Pausable {
      * @param trailingDistance The trailing distance in basis points (e.g., 200 = 2%)
      * @return newStopPrice The calculated trailing stop price (18 decimals)
      */
-    function _calculateTrailingStopPrice(uint256 currentPrice, uint256 trailingDistance) internal pure returns (uint256) {
+    function _calculateTrailingStopPrice(uint256 currentPrice, uint256 trailingDistance)
+        internal
+        pure
+        returns (uint256)
+    {
         // Calculate the trailing amount: currentPrice * trailingDistance / 10000
         uint256 trailingAmount = (currentPrice * trailingDistance) / _SLIPPAGE_DENOMINATOR;
-        
+
         // New stop price = current price - trailing amount
         return currentPrice - trailingAmount;
     }
