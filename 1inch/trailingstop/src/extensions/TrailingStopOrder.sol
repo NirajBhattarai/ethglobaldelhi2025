@@ -207,11 +207,10 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
      */
     function _calculateSlippage(uint256 expectedPrice, uint256 actualPrice) internal pure returns (uint256) {
         if (expectedPrice == 0) return 0;
-        
-        uint256 priceDifference = expectedPrice > actualPrice 
-            ? expectedPrice - actualPrice 
-            : actualPrice - expectedPrice;
-            
+
+        uint256 priceDifference =
+            expectedPrice > actualPrice ? expectedPrice - actualPrice : actualPrice - expectedPrice;
+
         return (priceDifference * _SLIPPAGE_DENOMINATOR) / expectedPrice;
     }
 
@@ -260,19 +259,19 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
                 order, extension, orderHash, taker, makingAmount, remainingMakingAmount, extraData
             );
         }
-        
+
         // TODO: implement the logic to get the taking amount
         return 0;
     }
 
     function preInteraction(
-        IOrderMixin.Order calldata /* order */,
-        bytes calldata /* extension */,
+        IOrderMixin.Order calldata, /* order */
+        bytes calldata, /* extension */
         bytes32 orderHash,
-        address /* taker */,
-        uint256 /* makingAmount */,
-        uint256 /* takingAmount */,
-        uint256 /* remainingMakingAmount */,
+        address, /* taker */
+        uint256, /* makingAmount */
+        uint256, /* takingAmount */
+        uint256, /* remainingMakingAmount */
         bytes calldata /* extraData */
     ) external view override {
         TrailingStopConfig memory config = trailingStopConfigs[orderHash];
@@ -287,12 +286,12 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
 
     function takerInteraction(
         IOrderMixin.Order calldata order,
-        bytes calldata /* extension */,
+        bytes calldata, /* extension */
         bytes32 orderHash,
         address taker,
         uint256 makingAmount,
         uint256 takingAmount,
-        uint256 /* remainingMakingAmount */,
+        uint256, /* remainingMakingAmount */
         bytes calldata /* extraData */
     ) external whenNotPaused {
         TrailingStopConfig memory config = trailingStopConfigs[orderHash];
@@ -315,10 +314,10 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
 
         // Calculate expected execution price based on order amounts
         uint256 expectedPrice = (takingAmount * 1e18) / makingAmount;
-        
+
         // Calculate actual execution price based on current market price
         uint256 actualPrice = currentPrice;
-        
+
         // Check slippage protection
         uint256 slippage = _calculateSlippage(expectedPrice, actualPrice);
         if (slippage > config.maxSlippage) {

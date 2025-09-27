@@ -137,7 +137,6 @@ contract OrderFillMainnetTest is Test {
             ,
             uint256 updateFrequency,
             ,
-            
         ) = trailingStopOrder.trailingStopConfigs(orderHash);
 
         assertEq(address(oracle), BTC_USD_ORACLE, "Oracle address should match");
