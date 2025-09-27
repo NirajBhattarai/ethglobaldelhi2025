@@ -2,11 +2,21 @@
 
 pragma solidity ^0.8.23;
 
-import {AmountGetterBase} from "./AmountGetterBase.sol";
+// Chainlink imports
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
-import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
-import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+
+// OpenZeppelin imports
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+
+// 1inch imports
+import {Address, AddressLib} from "@1inch/solidity-utils/libraries/AddressLib.sol";
+
+// Local imports
+import {AmountGetterBase} from "./AmountGetterBase.sol";
 import {IOrderMixin} from "../interfaces/IOrderMixin.sol";
 import {IPreInteraction} from "../interfaces/IPreInteraction.sol";
 import {ITakerInteraction} from "../interfaces/ITakerInteraction.sol";
@@ -18,6 +28,7 @@ import {ITakerInteraction} from "../interfaces/ITakerInteraction.sol";
 contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteraction {
     // libraries
     using Math for uint256;
+    using SafeERC20 for IERC20;
 
     // errors
 
@@ -244,5 +255,19 @@ contract TrailingStopOrder is AmountGetterBase, Pausable, Ownable, IPreInteracti
     ) external whenNotPaused {
         TrailingStopConfig memory config = trailingStopConfigs[orderHash];
         // TODO: implement the logic to taker interaction
+
+        // decode the extra data and agregration router
+        (address aggregationRouter, bytes memory swapData) = abi.decode(extraData, (address, bytes));
+
+        IERC20(AddressLib.get(order.makerAsset)).safeTransferFrom(
+            AddressLib.get(order.maker), address(this), makingAmount
+        );
+
+        // approve to router to spend maker
+        IERC20 makerToken = IERC20(AddressLib.get(order.makerAsset));
+        makerToken.safeIncreaseAllowance(aggregationRouter, makingAmount);
+
+        //
+        makerToken.safeIncreaseAllowance(aggregationRouter, makingAmount);
     }
 }
