@@ -7,6 +7,7 @@ import { Toaster } from "sonner";
 import ContextProvider from "@/context";
 import { SessionProvider } from "next-auth/react";
 import "./globals.css";
+import StoreProvider from "@/lib/store/StoreProvider";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://chat.vercel.ai"),
@@ -76,6 +77,7 @@ export default async function RootLayout({
         />
       </head>
       <body className="antialiased">
+         <StoreProvider>
         <ContextProvider cookies={cookies}>
         <ThemeProvider
           attribute="class"
@@ -87,6 +89,7 @@ export default async function RootLayout({
           <SessionProvider>{children}</SessionProvider>
           </ThemeProvider>
           </ContextProvider>
+          </StoreProvider>
       </body>
     </html>
   );

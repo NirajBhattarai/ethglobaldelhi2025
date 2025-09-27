@@ -2,6 +2,11 @@
 
 import { toast } from '@/components/toast';
 import { Button } from '@/components/ui/button';
+import {
+  clearWalletAddress,
+  setWalletAddress,
+} from '@/lib/store/features/userAccountDetailsSlice';
+import { useAppDispatch } from '@/lib/store/hooks';
 import { signIn } from 'next-auth/react';
 import { useEffect, useState } from 'react';
 import { useAccount, useDisconnect, useSignMessage } from 'wagmi';
@@ -12,6 +17,16 @@ export default function ConnectButton() {
   const { signMessageAsync } = useSignMessage();
   const [isSigning, setIsSigning] = useState(false);
   const [hasSigned, setHasSigned] = useState(false);
+  const dispatch = useAppDispatch();
+  
+  // Update Redux store when wallet connects/disconnects
+  useEffect(() => {
+    if (isConnected && address) {
+      dispatch(setWalletAddress(address));
+    } else {
+      dispatch(clearWalletAddress());
+    }
+  }, [isConnected, address, dispatch]);
 
   // Auto-trigger sign message when wallet connects
   useEffect(() => {
@@ -124,6 +139,7 @@ export default function ConnectButton() {
           onClick={() => {
             setHasSigned(false);
             disconnect();
+             dispatch(clearWalletAddress());
           }}
         >
           Disconnect
