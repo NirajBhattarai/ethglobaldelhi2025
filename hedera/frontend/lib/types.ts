@@ -7,6 +7,7 @@ import type { requestSuggestions } from "./ai/tools/request-suggestions";
 import type { updateDocument } from "./ai/tools/update-document";
 import type { Suggestion } from "./db/schema";
 import type { AppUsage } from "./usage";
+import { getWalletBalance } from "./ai/tools/get-wallet-balance";
 
 export type DataPart = { type: "append-message"; message: string };
 
@@ -17,6 +18,7 @@ export const messageMetadataSchema = z.object({
 export type MessageMetadata = z.infer<typeof messageMetadataSchema>;
 
 type weatherTool = InferUITool<typeof getWeather>;
+type walletBalanceTool = InferUITool<typeof getWalletBalance>;
 type createDocumentTool = InferUITool<ReturnType<typeof createDocument>>;
 type updateDocumentTool = InferUITool<ReturnType<typeof updateDocument>>;
 type requestSuggestionsTool = InferUITool<
@@ -28,6 +30,7 @@ export type ChatTools = {
   createDocument: createDocumentTool;
   updateDocument: updateDocumentTool;
   requestSuggestions: requestSuggestionsTool;
+  getWalletBalance: walletBalanceTool;
 };
 
 export type CustomUIDataTypes = {

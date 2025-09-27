@@ -32,6 +32,7 @@ import { MultimodalInput } from "./multimodal-input";
 import { getChatHistoryPaginationKey } from "./sidebar-history";
 import { toast } from "./toast";
 import type { VisibilityType } from "./visibility-selector";
+import { useAppSelector } from "@/lib/store/hooks";
 
 export function Chat({
   id,
@@ -54,6 +55,17 @@ export function Chat({
     chatId: id,
     initialVisibilityType,
   });
+
+  const walletAddress = useAppSelector(
+    (store) => store.userAccountDetails.walletAddress
+  );
+  // Use ref to always get the current wallet address value
+  const walletAddressRef = useRef(walletAddress);
+
+  // Update ref whenever wallet address changes
+  useEffect(() => {
+    walletAddressRef.current = walletAddress;
+  }, [walletAddress]);
 
   const { mutate } = useSWRConfig();
   const { setDataStream } = useDataStream();
@@ -84,14 +96,17 @@ export function Chat({
     transport: new DefaultChatTransport({
       api: "/api/chat",
       fetch: fetchWithErrorHandlers,
-      prepareSendMessagesRequest(request) {
+      prepareSendMessagesRequest({ messages, body, id }) {
         return {
           body: {
-            id: request.id,
-            message: request.messages.at(-1),
-            selectedChatModel: currentModelIdRef.current,
+            id,
+            message: messages.at(-1),
+            selectedChatModel: initialChatModel,
             selectedVisibilityType: visibilityType,
-            ...request.body,
+            chatBody: {
+              walletAddress: walletAddressRef.current,
+            },
+            ...body,
           },
         };
       },

@@ -43,6 +43,7 @@ import { fetchModels } from "tokenlens/fetch";
 import { getUsage } from "tokenlens/helpers";
 import { generateTitleFromUserMessage } from "../../actions";
 import { type PostRequestBody, postRequestBodySchema } from "./schema";
+import { getWalletBalance } from "@/lib/ai/tools/get-wallet-balance";
 
 export const maxDuration = 60;
 
@@ -100,19 +101,36 @@ export async function POST(request: Request) {
       message,
       selectedChatModel,
       selectedVisibilityType,
+      chatBody,
     }: {
       id: string;
       message: ChatMessage;
       selectedChatModel: ChatModel["id"];
       selectedVisibilityType: VisibilityType;
+      chatBody: {
+        walletAddress: string | null;
+      };
     } = requestBody;
 
     const session = await auth();
+    const { walletAddress } = chatBody;
+    console.log("walletAddress", walletAddress);
 
     if (!session?.user) {
       return new ChatSDKError("unauthorized:chat").toResponse();
     }
-
+    if (!walletAddress) {
+      return new Response(
+        JSON.stringify({
+          error: "Authentication Required",
+          message: "Please connect your wallet to use the chat.",
+        }),
+        {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    }
     const userType: UserType = session.user.type;
 
     const messageCount = await getMessageCountByUserId({
@@ -177,7 +195,11 @@ export async function POST(request: Request) {
       execute: ({ writer: dataStream }) => {
         const result = streamText({
           model: myProvider.languageModel(selectedChatModel),
-          system: systemPrompt({ selectedChatModel, requestHints }),
+          system: systemPrompt({
+            selectedChatModel,
+            requestHints,
+            walletAddress,
+          }),
           messages: convertToModelMessages(uiMessages),
           stopWhen: stepCountIs(5),
           experimental_activeTools:
@@ -188,10 +210,12 @@ export async function POST(request: Request) {
                   "createDocument",
                   "updateDocument",
                   "requestSuggestions",
+                  "getWalletBalance",
                 ],
           experimental_transform: smoothStream({ chunking: "word" }),
           tools: {
             getWeather,
+            getWalletBalance,
             createDocument: createDocument({ session, dataStream }),
             updateDocument: updateDocument({ session, dataStream }),
             requestSuggestions: requestSuggestions({

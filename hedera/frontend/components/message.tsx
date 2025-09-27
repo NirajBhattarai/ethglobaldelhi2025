@@ -24,6 +24,7 @@ import { MessageEditor } from "./message-editor";
 import { MessageReasoning } from "./message-reasoning";
 import { PreviewAttachment } from "./preview-attachment";
 import { Weather } from "./weather";
+import { WalletBalanceDisplay } from "./wallet-balance-display";
 
 const PurePreviewMessage = ({
   chatId,
@@ -163,6 +164,40 @@ const PurePreviewMessage = ({
                   </div>
                 );
               }
+            }
+
+            if (type === "tool-getWalletBalance") {
+              const { toolCallId, state } = part;
+
+              return (
+                <Tool key={toolCallId} defaultOpen={true}>
+                  <ToolHeader type="tool-getWalletBalance" state={state} />
+                  <ToolContent>
+                    {state === "input-available" && (
+                      <ToolInput input={part.input} />
+                    )}
+                    {state === "output-available" && (
+                      <ToolOutput
+                        output={
+                          "error" in part.output ? (
+                            <div className="p-2 text-red-500 rounded border">
+                              Error: {String(part.output.error)}
+                            </div>
+                          ) : (
+                            <WalletBalanceDisplay
+                              walletAddress={part.output.walletAddress}
+                              balances={part.output.balances}
+                              portfolioSummary={part.output.portfolioSummary}
+                              error={part.output.error}
+                            />
+                          )
+                        }
+                        errorText={undefined}
+                      />
+                    )}
+                  </ToolContent>
+                </Tool>
+              );
             }
 
             if (type === "tool-getWeather") {

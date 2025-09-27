@@ -32,8 +32,10 @@ This is a guide for using artifacts tools: \`createDocument\` and \`updateDocume
 Do not update document right after creating it. Wait for user feedback or request to update it.
 `;
 
-export const regularPrompt =
-  "You are a friendly assistant! Keep your responses concise and helpful.";
+export const generateRegularPrompt = (walletAddress: string): string => {
+  return `You are a friendly assistant! Keep your responses concise and helpful. You have access to wallet balance information for Hedera blockchain. When users ask about their wallet balance or say "get my wallet balance", use the getWalletBalance tool to fetch their current HBAR balance from Hedera testnet. This is the user's wallet Address ${walletAddress} ⁠`
+};
+
 
 export type RequestHints = {
   latitude: Geo["latitude"];
@@ -53,11 +55,14 @@ About the origin of user's request:
 export const systemPrompt = ({
   selectedChatModel,
   requestHints,
+  walletAddress,
 }: {
   selectedChatModel: string;
   requestHints: RequestHints;
+  walletAddress: string;
 }) => {
   const requestPrompt = getRequestPromptFromHints(requestHints);
+  const regularPrompt = generateRegularPrompt(walletAddress);
 
   if (selectedChatModel === "chat-model-reasoning") {
     return `${regularPrompt}\n\n${requestPrompt}`;
