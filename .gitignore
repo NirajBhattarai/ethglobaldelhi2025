@@ -146,6 +146,7 @@ logs
 # Temporary files
 tmp/
 temp/
+temp.txt
 
 # Build outputs
 build/

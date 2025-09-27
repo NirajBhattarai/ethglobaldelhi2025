@@ -1,10 +1,13 @@
+import { ThemeProvider } from "@/components/theme-provider";
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { headers } from "next/headers";
 import { Toaster } from "sonner";
-import { ThemeProvider } from "@/components/theme-provider";
 
-import "./globals.css";
+import ContextProvider from "@/context";
 import { SessionProvider } from "next-auth/react";
+import "./globals.css";
+import StoreProvider from "@/lib/store/StoreProvider";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://chat.vercel.ai"),
@@ -48,11 +51,13 @@ const THEME_COLOR_SCRIPT = `\
   updateThemeColor();
 })();`;
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+   const headersObj = await headers();
+  const cookies = headersObj.get('cookie');
   return (
     <html
       className={`${geist.variable} ${geistMono.variable}`}
@@ -72,6 +77,8 @@ export default function RootLayout({
         />
       </head>
       <body className="antialiased">
+         <StoreProvider>
+        <ContextProvider cookies={cookies}>
         <ThemeProvider
           attribute="class"
           defaultTheme="system"
@@ -80,7 +87,9 @@ export default function RootLayout({
         >
           <Toaster position="top-center" />
           <SessionProvider>{children}</SessionProvider>
-        </ThemeProvider>
+          </ThemeProvider>
+          </ContextProvider>
+          </StoreProvider>
       </body>
     </html>
   );
