@@ -6,6 +6,14 @@ import {IAutomationCompatible} from "../interfaces/IAutomationCompatible.sol";
 import {TrailingStopOrder} from "../extensions/TrailingStopOrder.sol";
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 
+/**
+ * @title TrailingStopKeeper
+ * @notice Keeper contract for managing trailing stop orders with Chainlink Automation
+ * 
+ * DEMO PURPOSE: This contract includes updateTrailingStopDemo() function for testing purposes.
+ * In production, the upkeep functions (checkUpkeep/performUpkeep) will be called by Chainlink Automation network.
+ * For demo purposes, we use updateTrailingStopDemo() function instead.
+ */
 contract TrailingStopKeeper is IAutomationCompatible {
     // libraries
 
@@ -49,6 +57,29 @@ contract TrailingStopKeeper is IAutomationCompatible {
         return updated;
     }
 
+    /**
+     * @notice DEMO FUNCTION - Updates trailing stop for a single order
+     * @dev This is a demo function for testing purposes. In production, use performUpkeep instead.
+     * @param orderHash The order hash to update
+     * @return updated Whether the update was successful
+     * @return currentStopPrice The current stop price after update attempt
+     */
+    function updateTrailingStopDemo(bytes32 orderHash) external returns (bool updated, uint256 currentStopPrice) {
+        // Update trailing stop price
+        try trailingStopOrder.updateTrailingStop(orderHash) {
+            updated = true;
+            totalUpdatesPerformed++;
+            lastProcessedBlock = block.number;
+        } catch {
+            updated = false;
+        }
+
+        // Always get the current stop price for demo display purposes
+        (, , , currentStopPrice) = trailingStopOrder.isTrailingStopTriggered(orderHash);
+
+        return (updated, currentStopPrice);
+    }
+
     function performUpkeep(bytes calldata checkData) external override {
         // decode all Trailing Stop Order hashes
         bytes32[] memory orderHashes = abi.decode(checkData, (bytes32[]));
@@ -56,9 +87,9 @@ contract TrailingStopKeeper is IAutomationCompatible {
         if (orderHashes.length == 0) {
             revert NoOrdersToProcess();
         }
-
-        // TODO: discuss with 1inch to handle threshold amount of orders to process
-
+        
+        // TODO: Put threshold amount of orders to process here
+        
         uint256 ordersProcessed = 0;
         uint256 ordersUpdated = 0;
 

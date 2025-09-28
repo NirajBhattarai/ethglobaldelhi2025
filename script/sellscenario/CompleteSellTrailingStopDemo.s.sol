@@ -20,6 +20,9 @@ import {ECDSA} from "@1inch/solidity-utils/libraries/ECDSA.sol";
  * @title CompleteSellTrailingStopDemo
  * @notice Complete demo that creates a SELL trailing stop order, simulates price movements, and fulfills the order
  * @dev This script creates a proper SELL order where maker sells LINK for USDC with trailing stop protection
+ * 
+ * DEMO PURPOSE: This script uses demo functions instead of Chainlink Automation upkeep for testing purposes.
+ * The TrailingStopKeeper contract has upkeep functionality temporarily commented out and uses updateTrailingStopDemo() instead.
  */
 contract CompleteSellTrailingStopDemo is Script {
     // Contract instances
@@ -36,7 +39,7 @@ contract CompleteSellTrailingStopDemo is Script {
     uint256 constant INITIAL_LINK_PRICE = 20e8; // $20
     uint256 constant TRAILING_DISTANCE = 300; // 3% trailing distance (300 basis points)
     uint256 constant LINK_AMOUNT = 2e18; // 2 LINK (maker sells this)
-    uint256 constant USDC_AMOUNT = 40e6; // 40 USDC (maker wants this)
+    uint256 constant USDC_AMOUNT = 70e6; // 70 USDC (maker wants this - adjusted for higher prices)
 
     // Order data
     IOrderMixin.Order public sellOrder;
@@ -220,7 +223,7 @@ contract CompleteSellTrailingStopDemo is Script {
             currentStopPrice: initialStopPrice,
             configuredAt: block.timestamp,
             lastUpdateAt: block.timestamp,
-            updateFrequency: 30, // 30 seconds for faster updates
+            updateFrequency: 10, // 10 seconds for faster updates
             maxSlippage: 100, // 1% max slippage
             maxPriceDeviation: 500, // 5% max price deviation
             twapWindow: 300, // 5 minutes TWAP window
@@ -249,15 +252,15 @@ contract CompleteSellTrailingStopDemo is Script {
     function _simulatePriceMovementsWithKeeper() internal {
         console.log("\n--- STEP 4: SIMULATING PRICE MOVEMENTS WITH KEEPER UPDATES ---");
         
-        // Price rises first: $20 → $21 → $22 → $23 → $24 → $25
+        // Price rises first: $20 → $22 → $25 → $28 → $30 → $32
         console.log("Simulating price rises (trailing stop should follow):");
         int256[] memory risePrices = new int256[](6);
-        risePrices[0] = 21e8;  // $21 (+$1)
-        risePrices[1] = 22e8;  // $22 (+$1)
-        risePrices[2] = 23e8;  // $23 (+$1)
-        risePrices[3] = 24e8;  // $24 (+$1)
-        risePrices[4] = 25e8;  // $25 (+$1)
-        risePrices[5] = 26e8;  // $26 (+$1)
+        risePrices[0] = 22e8;  // $22 (+$2)
+        risePrices[1] = 25e8;  // $25 (+$3)
+        risePrices[2] = 28e8;  // $28 (+$3)
+        risePrices[3] = 30e8;  // $30 (+$2)
+        risePrices[4] = 32e8;  // $32 (+$2)
+        risePrices[5] = 35e8;  // $35 (+$3)
 
         for (uint256 i = 0; i < risePrices.length; i++) {
             linkUsdAggregator.setPrice(risePrices[i]);
@@ -266,20 +269,18 @@ contract CompleteSellTrailingStopDemo is Script {
             // Update trailing stop via keeper
             _updateTrailingStopViaKeeper();
             
-            vm.warp(block.timestamp + 35); // 35 seconds (more than update frequency)
+            vm.warp(block.timestamp + 15); // 15 seconds (more than 10 second update frequency)
         }
 
-        // Price drops: $26 → $25 → $24 → $23 → $22 → $21 → $20 → $19
+        // Price drops: $35 → $30 → $25 → $20 → $15 → $10
         console.log("\nSimulating price drops (should trigger sell):");
-        int256[] memory dropPrices = new int256[](8);
-        dropPrices[0] = 25e8;  // $25 (-$1)
-        dropPrices[1] = 24e8;  // $24 (-$1)
-        dropPrices[2] = 23e8;  // $23 (-$1)
-        dropPrices[3] = 22e8;  // $22 (-$1)
-        dropPrices[4] = 21e8;  // $21 (-$1)
-        dropPrices[5] = 20e8;  // $20 (-$1)
-        dropPrices[6] = 19e8;  // $19 (-$1)
-        dropPrices[7] = 18e8;  // $18 (-$1) - Should trigger sell order
+        int256[] memory dropPrices = new int256[](6);
+        dropPrices[0] = 30e8;  // $30 (-$5)
+        dropPrices[1] = 25e8;  // $25 (-$5)
+        dropPrices[2] = 20e8;  // $20 (-$5)
+        dropPrices[3] = 15e8;  // $15 (-$5)
+        dropPrices[4] = 10e8;  // $10 (-$5)
+        dropPrices[5] = 8e8;   // $8 (-$2) - Should trigger sell order
 
         for (uint256 i = 0; i < dropPrices.length; i++) {
             linkUsdAggregator.setPrice(dropPrices[i]);
@@ -296,23 +297,17 @@ contract CompleteSellTrailingStopDemo is Script {
     }
 
     function _updateTrailingStopViaKeeper() internal {
-        // Create checkData with order hash
-        bytes32[] memory orderHashes = new bytes32[](1);
-        orderHashes[0] = orderHash;
-        bytes memory checkData = abi.encode(orderHashes);
+        // DEMO FUNCTION - Directly call the demo update function instead of upkeep
+        console.log("  Keeper updating trailing stop (DEMO MODE)...");
+        (bool updated, uint256 currentStopPrice) = keeper.updateTrailingStopDemo(orderHash);
         
-        // Check if upkeep is needed
-        (bool upkeepNeeded, bytes memory performData) = keeper.checkUpkeep(checkData);
+        // Always show the current stop price for demo purposes
+        console.log("  Current stop price: $", currentStopPrice / 1e8);
         
-        if (upkeepNeeded) {
-            console.log("  Keeper updating trailing stop...");
-            keeper.performUpkeep(performData);
-            
-            // Get updated stop price
-            (, , , uint256 stopPrice) = trailingStopOrder.isTrailingStopTriggered(orderHash);
-            console.log("  Updated stop price: $", stopPrice / 1e8);
+        if (updated) {
+            console.log("  [SUCCESS] Trailing stop updated successfully");
         } else {
-            console.log("  No keeper update needed");
+            console.log("  [INFO] No update needed (price conditions not met)");
         }
     }
 
