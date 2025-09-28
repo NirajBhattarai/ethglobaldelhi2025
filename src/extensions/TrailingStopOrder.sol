@@ -36,7 +36,7 @@ import {LimitOrderProtocol} from "../LimitOrderProtocol.sol";
  * Key Features:
  * - Dynamic stop price that follows price upward (for sell orders)
  * - Automatic profit locking as price moves favorably
- * - Dual Chainlink oracle integration with TWAP protection
+ * - Single Chainlink oracle integration with TWAP protection
  * - Keeper automation for continuous price monitoring
  * - Gas-optimized storage patterns
  * - Multi-decimal token support
@@ -105,7 +105,6 @@ contract TrailingStopOrder is
 
     struct TrailingStopConfig {
         AggregatorV3Interface makerAssetOracle;
-        AggregatorV3Interface takerAssetOracle; // Add dual oracle support
         uint256 initialStopPrice; // initial stop price in maker asset
         uint256 trailingDistance; // trailing distance in maker asset
         uint256 currentStopPrice; // updated stop price in maker asset
@@ -242,8 +241,8 @@ contract TrailingStopOrder is
     function configureTrailingStop(bytes32 orderHash, TrailingStopConfig calldata config) external {
         address maker = msg.sender;
 
-        // Enhanced validation with dual oracle support
-        if (address(config.makerAssetOracle) == address(0) || address(config.takerAssetOracle) == address(0)) {
+        // Enhanced validation with single oracle support
+        if (address(config.makerAssetOracle) == address(0)) {
             revert InvalidMakerAssetOracle();
         }
 
@@ -276,8 +275,8 @@ contract TrailingStopOrder is
             revert InvalidOrderType();
         }
 
-        // Validate oracle decimals match for price calculation
-        if (config.makerAssetOracle.decimals() != config.takerAssetOracle.decimals()) {
+        // Validate oracle decimals are valid
+        if (config.makerAssetOracle.decimals() > _MAX_ORACLE_DECIMALS) {
             revert OracleDecimalsMismatch();
         }
 
@@ -288,7 +287,6 @@ contract TrailingStopOrder is
 
         TrailingStopConfig storage storedConfig = trailingStopConfigs[orderHash];
         storedConfig.makerAssetOracle = config.makerAssetOracle;
-        storedConfig.takerAssetOracle = config.takerAssetOracle; // Add dual oracle
         storedConfig.initialStopPrice = config.initialStopPrice;
         storedConfig.trailingDistance = config.trailingDistance;
         storedConfig.currentStopPrice = config.initialStopPrice;
@@ -304,8 +302,8 @@ contract TrailingStopOrder is
         storedConfig.makerAssetDecimals = config.makerAssetDecimals;
         storedConfig.takerAssetDecimals = config.takerAssetDecimals;
 
-        // Initialize price history with current price using dual oracle
-        uint256 currentPrice = _getCurrentPriceSecure(config.makerAssetOracle, config.takerAssetOracle);
+        // Initialize price history with current price using single oracle
+        uint256 currentPrice = _getCurrentPrice(config.makerAssetOracle);
         _updatePriceHistory(orderHash, currentPrice);
 
         emit TrailingStopConfigUpdated(
@@ -332,7 +330,7 @@ contract TrailingStopOrder is
             revert InvalidUpdateFrequency();
         }
 
-        uint256 currentPrice = _getCurrentPriceSecure(config.makerAssetOracle, config.takerAssetOracle);
+        uint256 currentPrice = _getCurrentPriceSecure(config.makerAssetOracle);
 
         // Update price history
         _updatePriceHistory(orderHash, currentPrice);
@@ -384,13 +382,12 @@ contract TrailingStopOrder is
     }
 
     /**
-     * @notice Get current price from Chainlink oracles with comprehensive validation
-     * @dev Uses dual oracle system for better price accuracy and manipulation resistance
+     * @notice Get current price from Chainlink oracle with comprehensive validation
+     * @dev Uses single oracle system for price accuracy
      * @param makerAssetOracle The Chainlink price feed oracle for maker asset
-     * @param takerAssetOracle The Chainlink price feed oracle for taker asset
      * @return normalizedPrice The current price converted to 18 decimals
      */
-    function _getCurrentPriceSecure(AggregatorV3Interface makerAssetOracle, AggregatorV3Interface takerAssetOracle)
+    function _getCurrentPriceSecure(AggregatorV3Interface makerAssetOracle)
         internal
         view
         returns (uint256)
@@ -409,22 +406,15 @@ contract TrailingStopOrder is
             revert StaleOraclePrice();
         }
 
-        // Get taker asset price with validation
-        (, int256 takerPrice,, uint256 takerUpdatedAt,) = takerAssetOracle.latestRoundData();
-        if (takerPrice <= 0) {
-            revert InvalidOraclePrice();
+        // Convert price to 18 decimals
+        uint256 price = uint256(makerPrice);
+        uint8 oracleDecimals = makerAssetOracle.decimals();
+        
+        if (oracleDecimals < 18) {
+            price = price * (10 ** (18 - oracleDecimals));
+        } else if (oracleDecimals > 18) {
+            price = price / (10 ** (oracleDecimals - 18));
         }
-
-        // Use custom heartbeat or default
-        uint256 takerHeartbeat = oracleHeartbeats[address(takerAssetOracle)];
-        if (takerHeartbeat == 0) takerHeartbeat = _DEFAULT_ORACLE_TTL;
-
-        if (takerUpdatedAt + takerHeartbeat < block.timestamp) {
-            revert StaleOraclePrice();
-        }
-
-        // Calculate relative price (maker/taker) scaled to 18 decimals
-        uint256 price = Math.mulDiv(uint256(makerPrice), 10 ** _PRICE_DECIMALS, uint256(takerPrice));
 
         return price;
     }
@@ -546,12 +536,10 @@ contract TrailingStopOrder is
         PriceHistory[] storage history = priceHistories[orderHash];
 
         if (history.length == 0) {
-            // If no history, return current price using dual oracle
+            // If no history, return current price using single oracle
             TrailingStopConfig memory configData = trailingStopConfigs[orderHash];
-            if (
-                address(configData.makerAssetOracle) != address(0) && address(configData.takerAssetOracle) != address(0)
-            ) {
-                return _getCurrentPriceSecure(configData.makerAssetOracle, configData.takerAssetOracle);
+            if (address(configData.makerAssetOracle) != address(0)) {
+                return _getCurrentPriceSecure(configData.makerAssetOracle);
             }
             revert InvalidPriceHistory();
         }
@@ -571,7 +559,6 @@ contract TrailingStopOrder is
 
         // For testing: if recent price updates exist, use sophisticated calculation
         // In production, this would use proper time-weighted calculation
-        uint256 latestPrice = history[history.length - 1].price;
         uint256 latestTimestamp = history[history.length - 1].timestamp;
 
         // If the latest price is very recent (within 2 minutes), use sophisticated TWAP
@@ -871,8 +858,8 @@ contract TrailingStopOrder is
             );
         }
 
-        // Get current price from oracle using dual oracle system
-        uint256 currentPrice = _getCurrentPriceSecure(config.makerAssetOracle, config.takerAssetOracle);
+        // Get current price from oracle using single oracle system
+        uint256 currentPrice = _getCurrentPriceSecure(config.makerAssetOracle);
 
         // Validate price deviation from TWAP
         _validatePriceDeviation(orderHash, currentPrice, config.maxPriceDeviation);
@@ -913,8 +900,8 @@ contract TrailingStopOrder is
             );
         }
 
-        // Get current price from oracle using dual oracle system
-        uint256 currentPrice = _getCurrentPriceSecure(config.makerAssetOracle, config.takerAssetOracle);
+        // Get current price from oracle using single oracle system
+        uint256 currentPrice = _getCurrentPriceSecure(config.makerAssetOracle);
 
         // Validate price deviation from TWAP
         _validatePriceDeviation(orderHash, currentPrice, config.maxPriceDeviation);
@@ -961,7 +948,7 @@ contract TrailingStopOrder is
         }
 
         // Validate price deviation from TWAP
-        uint256 currentPrice = _getCurrentPriceSecure(config.makerAssetOracle, config.takerAssetOracle);
+        uint256 currentPrice = _getCurrentPriceSecure(config.makerAssetOracle);
         _validatePriceDeviation(orderHash, currentPrice, config.maxPriceDeviation);
     }
 
@@ -995,8 +982,8 @@ contract TrailingStopOrder is
             revert TrailingStopNotConfigured();
         }
 
-        // Get current price from Chainlink oracle (18 decimals) using dual oracle
-        uint256 currentPrice = _getCurrentPriceSecure(config.makerAssetOracle, config.takerAssetOracle);
+        // Get current price from Chainlink oracle (18 decimals) using single oracle
+        uint256 currentPrice = _getCurrentPriceSecure(config.makerAssetOracle);
 
         // Calculate TWAP price for additional validation
         uint256 twapPrice = _getTWAPPrice(orderHash);
@@ -1270,7 +1257,7 @@ contract TrailingStopOrder is
             return (false, 0, 0, 0);
         }
 
-        try this.getCurrentPriceSecureExternal(config.makerAssetOracle, config.takerAssetOracle) returns (uint256 price)
+        try this.getCurrentPriceSecureExternal(config.makerAssetOracle) returns (uint256 price)
         {
             currentPrice = price;
             twapPrice = _getTWAPPrice(orderHash);
@@ -1287,17 +1274,16 @@ contract TrailingStopOrder is
     }
 
     /**
-     * @notice Get current price securely (external version) with dual oracle support
+     * @notice Get current price securely (external version) with single oracle support
      * @param makerOracle The maker asset oracle to query
-     * @param takerOracle The taker asset oracle to query
      * @return price The current price
      */
-    function getCurrentPriceSecureExternal(AggregatorV3Interface makerOracle, AggregatorV3Interface takerOracle)
+    function getCurrentPriceSecureExternal(AggregatorV3Interface makerOracle)
         external
         view
         returns (uint256 price)
     {
-        return _getCurrentPriceSecure(makerOracle, takerOracle);
+        return _getCurrentPriceSecure(makerOracle);
     }
 
     /**

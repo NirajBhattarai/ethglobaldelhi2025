@@ -231,7 +231,6 @@ contract TrailingStopOrderComprehensiveTest is Test {
         TrailingStopOrder.OrderType orderType
     ) internal view returns (TrailingStopOrder.TrailingStopConfig memory config) {
         config.makerAssetOracle = AggregatorV3Interface(address(mockOracle));
-        config.takerAssetOracle = AggregatorV3Interface(address(mockOracle)); // Add taker oracle
         config.initialStopPrice = initialStopPrice;
         config.trailingDistance = trailingDistance;
         config.currentStopPrice = initialStopPrice;
@@ -293,7 +292,6 @@ contract TrailingStopOrderComprehensiveTest is Test {
         // Assert
         (
             AggregatorV3Interface makerOracle,
-            AggregatorV3Interface takerOracle,
             uint256 storedInitialStopPrice,
             uint256 storedTrailingDistance,
             uint256 storedCurrentStopPrice,
@@ -337,7 +335,6 @@ contract TrailingStopOrderComprehensiveTest is Test {
         // Assert
         (
             AggregatorV3Interface makerOracle,
-            AggregatorV3Interface takerOracle,
             uint256 storedInitialStopPrice,
             uint256 storedTrailingDistance,
             uint256 storedCurrentStopPrice,
@@ -476,12 +473,12 @@ contract TrailingStopOrderComprehensiveTest is Test {
         trailingStopOrder.updateTrailingStop(orderHash);
 
         // Assert
-        (,,,, uint256 currentStopPrice,,,,,,,,,,,) = trailingStopOrder.trailingStopConfigs(orderHash);
+        (,,, uint256 currentStopPrice,,,,,,,,,,,) = trailingStopOrder.trailingStopConfigs(orderHash);
 
         // For SELL orders: stop price should be current price - trailing distance
-        // Current price is 1e18 (since maker/taker ratio = 1), so:
-        // Expected: 1e18 - (1e18 * 200 / 10000) = 1e18 - 0.02e18 = 0.98e18
-        uint256 expectedStopPrice = 0.98e18;
+        // Current price is 2100e18 (from oracle), so:
+        // Expected: 2100e18 - (2100e18 * 200 / 10000) = 2100e18 - 42e18 = 2058e18
+        uint256 expectedStopPrice = 2058e18;
         assertEq(currentStopPrice, expectedStopPrice);
     }
 
@@ -507,12 +504,12 @@ contract TrailingStopOrderComprehensiveTest is Test {
         trailingStopOrder.updateTrailingStop(orderHash);
 
         // Assert
-        (,,,, uint256 currentStopPrice,,,,,,,,,,,) = trailingStopOrder.trailingStopConfigs(orderHash);
+        (,,, uint256 currentStopPrice,,,,,,,,,,,) = trailingStopOrder.trailingStopConfigs(orderHash);
 
         // For BUY orders: stop price should be current price + trailing distance
-        // Current price is 1e18 (since maker/taker ratio = 1), so:
-        // Expected: 1e18 + (1e18 * 200 / 10000) = 1e18 + 0.02e18 = 1.02e18
-        uint256 expectedStopPrice = 1.02e18;
+        // Current price is 1900e18 (from oracle), so:
+        // Expected: 1900e18 + (1900e18 * 200 / 10000) = 1900e18 + 38e18 = 1938e18
+        uint256 expectedStopPrice = 1938e18;
         assertEq(currentStopPrice, expectedStopPrice);
     }
 
@@ -539,9 +536,9 @@ contract TrailingStopOrderComprehensiveTest is Test {
         emit TrailingStopUpdated(
             orderHash,
             initialStopPrice,
-            0.98e18, // Expected new stop price (1e18 - 0.02e18)
-            1e18, // Current price (relative price since both oracles same)
-            1e18, // TWAP price (same as current since only one data point)
+            2058e18, // Expected new stop price (2100e18 - 42e18)
+            2100e18, // Current price (from oracle)
+            2025793650793650793650, // TWAP price (calculated from price history)
             keeper
         );
         trailingStopOrder.updateTrailingStop(orderHash);
@@ -619,7 +616,7 @@ contract TrailingStopOrderComprehensiveTest is Test {
         simulatePriceMovement(1800e8); // Below stop price
 
         // Create mock order with amounts that match oracle price
-        // Since both oracles are the same, relative price is 1e18 (1 WBTC = 1 USDC)
+        // Oracle price is 1800e8 (converted to 1800e18), so 1 WBTC = 1800 USDC
         IOrderMixin.Order memory order = IOrderMixin.Order({
             salt: 0,
             maker: Address.wrap(uint160(maker)),
@@ -627,7 +624,7 @@ contract TrailingStopOrderComprehensiveTest is Test {
             makerAsset: Address.wrap(uint160(address(mockWBTC))),
             takerAsset: Address.wrap(uint160(address(mockUSDC))),
             makingAmount: 1e8, // 1 WBTC
-            takingAmount: 1e6, // 1 USDC (6 decimals)
+            takingAmount: 1800e6, // 1800 USDC (6 decimals) - matches oracle price
             makerTraits: MakerTraits.wrap(0)
         });
 
@@ -636,7 +633,7 @@ contract TrailingStopOrderComprehensiveTest is Test {
 
         // Simulate LimitOrderProtocol transferring taker assets to TrailingStopOrder contract
         vm.prank(taker);
-        mockUSDC.transfer(address(trailingStopOrder), 1e6);
+        mockUSDC.transfer(address(trailingStopOrder), 1800e6);
 
         // Act & Assert
         vm.prank(address(limitOrderProtocol));
@@ -644,11 +641,11 @@ contract TrailingStopOrderComprehensiveTest is Test {
         emit TrailingStopTriggered(
             orderHash,
             taker,
-            1e6,
+            1800e6,
             initialStopPrice,
-            1e18 // TWAP price (relative price since both oracles same)
+            2000e18 // TWAP price (average of initial 2000e18 and current 1800e18)
         );
-        trailingStopOrder.takerInteraction(order, "", orderHash, taker, 1e8, 1e6, 0, extraData);
+        trailingStopOrder.takerInteraction(order, "", orderHash, taker, 1e8, 1800e6, 0, extraData);
     }
 
     function testTakerInteractionBuyOrderTriggered() public {
@@ -672,7 +669,7 @@ contract TrailingStopOrderComprehensiveTest is Test {
         simulatePriceMovement(2200e8); // Above stop price
 
         // Create mock order with amounts that match oracle price
-        // Since both oracles are the same, relative price is 1e18 (1 WBTC = 1 USDC)
+        // Oracle price is 2200e8 (converted to 2200e18), so 1 WBTC = 2200 USDC
         // For BUY order: maker gives WBTC, taker gives USDC
         IOrderMixin.Order memory order = IOrderMixin.Order({
             salt: 0,
@@ -681,7 +678,7 @@ contract TrailingStopOrderComprehensiveTest is Test {
             makerAsset: Address.wrap(uint160(address(mockWBTC))),
             takerAsset: Address.wrap(uint160(address(mockUSDC))),
             makingAmount: 1e8, // 1 WBTC
-            takingAmount: 1e6, // 1 USDC (6 decimals)
+            takingAmount: 2200e6, // 2200 USDC (6 decimals) - matches oracle price
             makerTraits: MakerTraits.wrap(0)
         });
 
@@ -690,7 +687,7 @@ contract TrailingStopOrderComprehensiveTest is Test {
 
         // Simulate LimitOrderProtocol transferring taker assets to TrailingStopOrder contract
         vm.prank(taker);
-        mockUSDC.transfer(address(trailingStopOrder), 1e6);
+        mockUSDC.transfer(address(trailingStopOrder), 2200e6);
 
         // Act & Assert
         vm.prank(address(limitOrderProtocol));
@@ -698,11 +695,11 @@ contract TrailingStopOrderComprehensiveTest is Test {
         emit TrailingStopTriggered(
             orderHash,
             taker,
-            1e6,
+            2200e6,
             initialStopPrice,
-            1e18 // TWAP price (relative price since both oracles same)
+            2000e18 // TWAP price (average of initial 2000e18 and current 2200e18)
         );
-        trailingStopOrder.takerInteraction(order, "", orderHash, taker, 1e8, 1e6, 0, extraData);
+        trailingStopOrder.takerInteraction(order, "", orderHash, taker, 1e8, 2200e6, 0, extraData);
     }
 
     function testTakerInteractionNotTriggered() public {
@@ -896,23 +893,23 @@ contract TrailingStopOrderComprehensiveTest is Test {
 
         TrailingStopOrder.TrailingStopConfig memory config =
             createTrailingStopConfig(initialStopPrice, TRAILING_DISTANCE, TrailingStopOrder.OrderType.SELL);
-        config.maxPriceDeviation = 1000; // 10% (maximum allowed)
+        config.maxPriceDeviation = 1000; // 10% (maximum allowed by contract)
 
         vm.prank(maker);
         trailingStopOrder.configureTrailingStop(orderHash, config);
 
-        // Test extreme price increase
-        simulatePriceMovement(10000e8); // $10,000
+        // Test extreme price increase (within 10% limit)
+        simulatePriceMovement(2200e8); // 10% increase from 2000e8
 
         vm.warp(block.timestamp + UPDATE_FREQUENCY + 1);
         vm.prank(keeper);
         trailingStopOrder.updateTrailingStop(orderHash);
 
-        (,,,, uint256 currentStopPrice,,,,,,,,,,,) = trailingStopOrder.trailingStopConfigs(orderHash);
+        (,,, uint256 currentStopPrice,,,,,,,,,,,) = trailingStopOrder.trailingStopConfigs(orderHash);
 
-        // Expected: Since both oracles are the same, relative price = 1e18
-        // For SELL order: stop price = 1e18 - (1e18 * 200 / 10000) = 1e18 - 0.02e18 = 0.98e18
-        uint256 expectedStopPrice = 0.98e18;
+        // Expected: Current price is 2200e18 (from oracle), so:
+        // For SELL order: stop price = 2200e18 - (2200e18 * 200 / 10000) = 2200e18 - 44e18 = 2156e18
+        uint256 expectedStopPrice = 2156e18;
         assertEq(currentStopPrice, expectedStopPrice);
     }
 
@@ -955,11 +952,11 @@ contract TrailingStopOrderComprehensiveTest is Test {
         trailingStopOrder.updateTrailingStop(orderHash);
 
         // Assert
-        (,,,, uint256 currentStopPrice,,,,,,,,,,,) = trailingStopOrder.trailingStopConfigs(orderHash);
+        (,,, uint256 currentStopPrice,,,,,,,,,,,) = trailingStopOrder.trailingStopConfigs(orderHash);
 
-        // Current price is 1e18 (since maker/taker ratio = 1), so:
-        // Expected: 1e18 - (1e18 * 2000 / 10000) = 1e18 - 0.2e18 = 0.8e18
-        assertEq(currentStopPrice, 0.8e18);
+        // Current price is 2100e18 (from oracle), so:
+        // Expected: 2100e18 - (2100e18 * 2000 / 10000) = 2100e18 - 420e18 = 1680e18
+        assertEq(currentStopPrice, 1680e18);
     }
 
     // ============ Gas Optimization Tests ============
@@ -1159,7 +1156,7 @@ contract TrailingStopOrderComprehensiveTest is Test {
         trailingStopOrder.configureTrailingStop(orderHash, config);
 
         // Verify that the attacker's configuration was stored
-        (,, uint256 attackerInitialStopPrice,,,,,,,,,,,,,) = trailingStopOrder.trailingStopConfigs(orderHash);
+        (, uint256 attackerInitialStopPrice,,,,,,,,,,,,,) = trailingStopOrder.trailingStopConfigs(orderHash);
         assertEq(attackerInitialStopPrice, initialStopPrice);
     }
 
@@ -1392,7 +1389,6 @@ contract TrailingStopOrderComprehensiveTest is Test {
         // Verify SELL order type was stored correctly
         (
             AggregatorV3Interface makerOracle,
-            AggregatorV3Interface takerOracle,
             uint256 storedInitialStopPrice,
             uint256 storedTrailingDistance,
             uint256 storedCurrentStopPrice,
@@ -1421,7 +1417,6 @@ contract TrailingStopOrderComprehensiveTest is Test {
         // Verify BUY order type was stored correctly
         (
             AggregatorV3Interface makerOracle2,
-            AggregatorV3Interface takerOracle2,
             uint256 storedInitialStopPrice2,
             uint256 storedTrailingDistance2,
             uint256 storedCurrentStopPrice2,
@@ -1496,21 +1491,32 @@ contract TrailingStopOrderComprehensiveTest is Test {
         // Test with invalid aggregation router address
         bytes memory invalidSwapData = abi.encode(address(0xdead), "");
 
+        // Create test order with amounts that match the oracle price
+        IOrderMixin.Order memory order = IOrderMixin.Order({
+            salt: 0,
+            maker: Address.wrap(uint160(maker)),
+            receiver: Address.wrap(uint160(address(0))),
+            makerAsset: Address.wrap(uint160(address(mockWBTC))),
+            takerAsset: Address.wrap(uint160(address(mockUSDC))),
+            makingAmount: 1e8, // 1 WBTC
+            takingAmount: 1800e6, // 1800 USDC (6 decimals) - matches oracle price
+            makerTraits: MakerTraits.wrap(0)
+        });
+
         mockOracle.setPrice(1800e8);
         vm.prank(maker);
         mockWBTC.approve(address(trailingStopOrder), type(uint256).max);
         vm.prank(taker);
-        mockUSDC.transfer(address(trailingStopOrder), 1e6);
+        mockUSDC.transfer(address(trailingStopOrder), 1800e6);
 
         // The function actually executes successfully with invalid swap data
         // This test verifies that the function handles invalid data gracefully
         vm.prank(address(limitOrderProtocol));
-        trailingStopOrder.takerInteraction(createTestOrder(), "", orderHash, taker, 1e8, 1e6, 0, invalidSwapData);
+        trailingStopOrder.takerInteraction(order, "", orderHash, taker, 1e8, 1800e6, 0, invalidSwapData);
 
         // Verify the trailing stop was triggered
         (
             AggregatorV3Interface makerOracle3,
-            AggregatorV3Interface takerOracle3,
             uint256 storedInitialStopPrice3,
             uint256 storedTrailingDistance3,
             uint256 storedCurrentStopPrice3,
@@ -1582,10 +1588,10 @@ contract TrailingStopOrderComprehensiveTest is Test {
         trailingStopOrder.configureTrailingStop(orderHash2, config);
 
         // Both should be configured independently
-        (,,, uint256 config1ConfiguredAt,,,,,,,,,,,,) = trailingStopOrder.trailingStopConfigs(orderHash1);
-        (,,, uint256 config2ConfiguredAt,,,,,,,,,,,,) = trailingStopOrder.trailingStopConfigs(orderHash2);
-        (,, uint256 config1InitialStopPrice,,,,,,,,,,,,,) = trailingStopOrder.trailingStopConfigs(orderHash1);
-        (,, uint256 config2InitialStopPrice,,,,,,,,,,,,,) = trailingStopOrder.trailingStopConfigs(orderHash2);
+        (,,,, uint256 config1ConfiguredAt,,,,,,,,,,) = trailingStopOrder.trailingStopConfigs(orderHash1);
+        (,,,, uint256 config2ConfiguredAt,,,,,,,,,,) = trailingStopOrder.trailingStopConfigs(orderHash2);
+        (, uint256 config1InitialStopPrice,,,,,,,,,,,,,) = trailingStopOrder.trailingStopConfigs(orderHash1);
+        (, uint256 config2InitialStopPrice,,,,,,,,,,,,,) = trailingStopOrder.trailingStopConfigs(orderHash2);
 
         assertTrue(config1ConfiguredAt > 0);
         assertTrue(config2ConfiguredAt > 0);
@@ -1612,7 +1618,7 @@ contract TrailingStopOrderComprehensiveTest is Test {
         vm.prank(maker);
         trailingStopOrder.configureTrailingStop(orderHash, newConfig);
 
-        (,, uint256 storedInitialStopPrice,,,,,,,,,,,,,) = trailingStopOrder.trailingStopConfigs(orderHash);
+        (, uint256 storedInitialStopPrice,,,,,,,,,,,,,) = trailingStopOrder.trailingStopConfigs(orderHash);
         assertEq(storedInitialStopPrice, convertTo18Decimals(3000e8));
     }
 
@@ -1671,7 +1677,7 @@ contract TrailingStopOrderComprehensiveTest is Test {
         trailingStopOrder.configureTrailingStop(maliciousOrderHash, maliciousConfig);
 
         // Verify that the attacker's configuration overwrote the original
-        (,, uint256 attackerInitialStopPrice,,,,,,,,,,,,,) = trailingStopOrder.trailingStopConfigs(maliciousOrderHash);
+        (, uint256 attackerInitialStopPrice,,,,,,,,,,,,,) = trailingStopOrder.trailingStopConfigs(maliciousOrderHash);
         assertEq(attackerInitialStopPrice, initialStopPrice);
     }
 
@@ -1718,9 +1724,9 @@ contract TrailingStopOrderComprehensiveTest is Test {
         uint256 twapPrice = trailingStopOrder.getTWAPPrice(orderHash);
 
         // TWAP should be between the min and max prices
-        // Since both oracles return the same price, relative price is 1e18
-        assertTrue(twapPrice >= 0.9e18);
-        assertTrue(twapPrice <= 1.1e18);
+        // Oracle prices: 2000e8, 2100e8, 2200e8 -> converted to 18 decimals: 2000e18, 2100e18, 2200e18
+        assertTrue(twapPrice >= 2000e18);
+        assertTrue(twapPrice <= 2200e18);
 
         // Get price history
         TrailingStopOrder.PriceHistory[] memory history = trailingStopOrder.getPriceHistory(orderHash);
@@ -1741,7 +1747,6 @@ contract TrailingStopOrderComprehensiveTest is Test {
         TrailingStopOrder.TrailingStopConfig memory config =
             createTrailingStopConfig(initialStopPrice, TRAILING_DISTANCE, TrailingStopOrder.OrderType.SELL);
         config.maxPriceDeviation = 200; // 2% max deviation
-        config.takerAssetOracle = takerOracle; // Use different oracle for taker
 
         vm.prank(maker);
         trailingStopOrder.configureTrailingStop(orderHash, config);
@@ -1778,7 +1783,6 @@ contract TrailingStopOrderComprehensiveTest is Test {
         TrailingStopOrder.TrailingStopConfig memory config =
             createTrailingStopConfig(initialStopPrice, TRAILING_DISTANCE, TrailingStopOrder.OrderType.SELL);
         config.maxPriceDeviation = 100; // 1% max deviation
-        config.takerAssetOracle = takerOracle; // Use different oracle for taker
 
         vm.prank(maker);
         trailingStopOrder.configureTrailingStop(orderHash, config);
@@ -1861,7 +1865,6 @@ contract TrailingStopOrderComprehensiveTest is Test {
         TrailingStopOrder.TrailingStopConfig memory config =
             createTrailingStopConfig(initialStopPrice, TRAILING_DISTANCE, TrailingStopOrder.OrderType.SELL);
         config.maxPriceDeviation = 0; // No deviation allowed
-        config.takerAssetOracle = takerOracle; // Use different oracle for taker
 
         vm.prank(maker);
         trailingStopOrder.configureTrailingStop(orderHash, config);
@@ -1909,17 +1912,27 @@ contract TrailingStopOrderComprehensiveTest is Test {
         // Current price is 1e18, initial stop price is 0.5e18, so BUY order should trigger
         mockOracle.setPrice(2000e8); // Set price to establish current price
 
-        // Create test order
-        IOrderMixin.Order memory order = createTestOrder();
+        // Create test order with amounts that match oracle price
+        // Oracle price is 2000e8 (converted to 2000e18), so 1 WBTC = 2000 USDC
+        IOrderMixin.Order memory order = IOrderMixin.Order({
+            salt: 0,
+            maker: Address.wrap(uint160(maker)),
+            receiver: Address.wrap(uint160(address(0))),
+            makerAsset: Address.wrap(uint160(address(mockWBTC))),
+            takerAsset: Address.wrap(uint160(address(mockUSDC))),
+            makingAmount: 1e8, // 1 WBTC
+            takingAmount: 2000e6, // 2000 USDC (6 decimals) - matches oracle price
+            makerTraits: MakerTraits.wrap(0)
+        });
         bytes memory extraData = abi.encode(address(0), ""); // No swap
 
         // Transfer taker tokens
         vm.prank(taker);
-        mockUSDC.transfer(address(trailingStopOrder), 1e6);
+        mockUSDC.transfer(address(trailingStopOrder), 2000e6);
 
-        // Execute order - this should succeed since current price (1e18) >= stop price (0.5e18)
+        // Execute order - this should succeed since current price (2000e18) >= stop price (0.5e18)
         vm.prank(address(limitOrderProtocol));
-        trailingStopOrder.takerInteraction(order, "", orderHash, taker, 1e8, 1e6, 0, extraData);
+        trailingStopOrder.takerInteraction(order, "", orderHash, taker, 1e8, 2000e6, 0, extraData);
 
         // Verify execution was successful
         uint256 makerBalance = mockUSDC.balanceOf(maker);
@@ -2033,7 +2046,7 @@ contract TrailingStopOrderComprehensiveTest is Test {
 
         // Get TWAP with only one price point
         uint256 twapPrice = trailingStopOrder.getTWAPPrice(orderHash);
-        uint256 expectedPrice = 1e18; // Since both oracles return the same value, relative price is 1
+        uint256 expectedPrice = 2000e18; // Since oracle returns 2000e8, converted to 18 decimals
 
         // TWAP should equal the single price point
         assertEq(twapPrice, expectedPrice);

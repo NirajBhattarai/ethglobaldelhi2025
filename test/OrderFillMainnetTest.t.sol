@@ -137,7 +137,6 @@ contract OrderFillMainnetTest is Test {
         // 2. Configure trailing stop with real oracle
         TrailingStopOrder.TrailingStopConfig memory config = TrailingStopOrder.TrailingStopConfig({
             makerAssetOracle: btcOracle, // Use real mainnet oracle
-            takerAssetOracle: usdcOracle, // Add taker oracle
             initialStopPrice: (btcPrice * 9) / 10, // 90% of current price
             trailingDistance: 200, // 2%
             currentStopPrice: (btcPrice * 9) / 10,

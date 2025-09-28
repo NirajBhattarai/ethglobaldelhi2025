@@ -108,7 +108,6 @@ contract TrailingStopKeeper is IAutomationCompatible {
         for (uint256 i = 0; i < orderHashes.length; i++) {
             (
                 , // AggregatorV3Interface makerAssetOracle
-                , // AggregatorV3Interface takerAssetOracle
                 , // uint256 initialStopPrice
                 , // uint256 trailingDistance
                 , // uint256 currentStopPrice

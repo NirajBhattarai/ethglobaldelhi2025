@@ -233,6 +233,124 @@ This trailing stop mechanism ensures that users always get favorable prices whil
 User Creates Order → TrailingStopOrder Contract → Chainlink Keeper Monitors → Price Movement Detected → Order Executed via 1inch
 ```
 
+## 🏛️ System Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                                USER LAYER                                       │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│  👤 User/Trader  ──────────────►  🖥️ Frontend Interface                        │
+└─────────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                           SMART CONTRACT LAYER                                 │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│  📋 LimitOrderProtocol  ◄──────►  🎯 TrailingStopOrder  ◄──────►  🤖 TrailingStopKeeper │
+│  (1inch Core Protocol)    │      (Extension Contract)    │      (Automation Contract) │
+└─────────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                            EXTERNAL SERVICES                                   │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│  🔗 Chainlink Automation  ◄──────►  📊 Chainlink Price Feeds  ◄──────►  🔄 1inch Router │
+│  (Keeper Network)         │        (ETH/USDC Oracle)        │        (DEX Aggregation) │
+└─────────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                               DEX LAYER                                        │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│  🦄 Uniswap V3  ◄──────►  🍣 SushiSwap  ◄──────►  📈 Curve  ◄──────►  📊 Other DEXs │
+└─────────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                              TOKEN LAYER                                       │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│  ⚡ ETH  ◄──────►  💵 USDC  ◄──────►  ₿ WBTC  ◄──────►  🪙 Other Tokens        │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+DATA FLOW:
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│ 1. Order    │───►│ 2. Config   │───►│ 3. Monitor  │───►│ 4. Execute  │
+│ Creation    │    │ Storage     │    │ Price       │    │ Trade       │
+└─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
+       │                   │                   │                   │
+       ▼                   ▼                   ▼                   ▼
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│ User creates│    │ TSO stores  │    │ Keeper      │    │ 1inch       │
+│ trailing    │    │ order params │    │ updates     │    │ executes    │
+│ stop order  │    │ & config    │    │ stop prices │    │ optimal     │
+│             │    │             │    │ via Chainlink│    │ swap        │
+└─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
+```
+
+### Architecture Components Explained
+
+#### 🎯 **TrailingStopOrder Contract**
+- **Purpose**: Core extension to 1inch Limit Order Protocol
+- **Features**: 
+  - Dynamic stop price calculation
+  - TWAP (Time-Weighted Average Price) protection
+  - Multi-decimal token support
+  - Slippage protection
+- **Key Functions**:
+  - `configureTrailingStop()`: Set up trailing stop parameters
+  - `updateTrailingStop()`: Update stop price based on market movement
+  - `takerInteraction()`: Execute order when triggered
+
+#### 🤖 **TrailingStopKeeper Contract**
+- **Purpose**: Chainlink Automation keeper for monitoring orders
+- **Features**:
+  - Batch processing of multiple orders
+  - Gas-optimized order updates
+  - Automated price monitoring
+- **Key Functions**:
+  - `checkUpkeep()`: Check if orders need updates
+  - `performUpkeep()`: Execute batch updates
+  - `_processOrder()`: Process individual order updates
+
+#### 📋 **LimitOrderProtocol Contract**
+- **Purpose**: 1inch core protocol for order management
+- **Features**:
+  - Order creation and validation
+  - Signature verification
+  - Asset transfers
+  - Integration with extensions
+
+#### 🔗 **Chainlink Integration**
+- **Automation Network**: Provides reliable, decentralized automation
+- **Price Feeds**: Real-time price data with TWAP protection
+- **Keeper Network**: Automated execution without manual intervention
+
+#### 🔄 **1inch Aggregation Router**
+- **Purpose**: Optimal trade execution across multiple DEXs
+- **Features**:
+  - Best price discovery
+  - Gas optimization
+  - Multi-DEX routing
+  - Slippage protection
+
+### Data Flow
+
+1. **Order Creation**: User creates trailing stop order through frontend
+2. **Configuration**: TrailingStopOrder contract stores order parameters
+3. **Monitoring**: TrailingStopKeeper monitors price movements via Chainlink
+4. **Price Updates**: Keeper updates trailing stop prices based on market data
+5. **Order Execution**: When triggered, order executes through 1inch router
+6. **Asset Exchange**: Tokens are swapped across optimal DEXs
+7. **Settlement**: Final tokens are transferred to user
+
+### Security Features
+
+- **Oracle Validation**: Multiple price feed validation with TWAP
+- **Slippage Protection**: Configurable slippage limits
+- **Reentrancy Guards**: Protection against reentrancy attacks
+- **Access Controls**: Role-based access management
+- **Emergency Pause**: Circuit breaker functionality
+
 ## 📊 Trading Scenarios & Examples
 
 ### Scenario 1: BUY ORDER - ETH/USDC Pair
@@ -450,7 +568,6 @@ forge script script/TrailingStopDemo.s.sol:TrailingStopDemoScript \
 ```solidity
 struct TrailingStopConfig {
     address makerAssetOracle;        // Price oracle for maker asset
-    address takerAssetOracle;        // Price oracle for taker asset
     uint256 initialStopPrice;        // Initial stop price (in oracle decimals)
     uint256 trailingDistance;        // Trailing distance in basis points (e.g., 300 = 3%)
     uint256 currentStopPrice;        // Current stop price (updates dynamically)

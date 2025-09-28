@@ -286,7 +286,6 @@ contract TrailingStopDemoScript is Script {
         // Create trailing stop extension data
         TrailingStopOrder.TrailingStopConfig memory config = TrailingStopOrder.TrailingStopConfig({
             makerAssetOracle: ethUsdAggregator,
-            takerAssetOracle: ethUsdAggregator,
             initialStopPrice: INITIAL_ETH_PRICE - (INITIAL_ETH_PRICE * TRAILING_DISTANCE / 10000), // $1900 (5% below $2000)
             trailingDistance: TRAILING_DISTANCE,
             currentStopPrice: INITIAL_ETH_PRICE - (INITIAL_ETH_PRICE * TRAILING_DISTANCE / 10000),
@@ -352,7 +351,6 @@ contract TrailingStopDemoScript is Script {
         // Create trailing stop extension data for buy order
         TrailingStopOrder.TrailingStopConfig memory config = TrailingStopOrder.TrailingStopConfig({
             makerAssetOracle: ethUsdAggregator,
-            takerAssetOracle: ethUsdAggregator,
             initialStopPrice: INITIAL_ETH_PRICE + (INITIAL_ETH_PRICE * TRAILING_DISTANCE / 10000), // $2100 (5% above $2000)
             trailingDistance: TRAILING_DISTANCE,
             currentStopPrice: INITIAL_ETH_PRICE + (INITIAL_ETH_PRICE * TRAILING_DISTANCE / 10000),
@@ -413,7 +411,7 @@ contract TrailingStopDemoScript is Script {
         console.log("Trailing stop updated:", updated);
 
         // Get updated order info
-        (,,,, uint256 currentStopPrice,,,,,,,,,,,) = trailingStopOrder.trailingStopConfigs(orderHash);
+        (,,,, uint256 currentStopPrice,,,,,,,,,,) = trailingStopOrder.trailingStopConfigs(orderHash);
         console.log("Updated stop price: $", currentStopPrice / 1e8);
 
         // Simulate unfavorable price movement (trigger condition)
@@ -454,7 +452,6 @@ contract TrailingStopDemoScript is Script {
 
         TrailingStopOrder.TrailingStopConfig memory config = TrailingStopOrder.TrailingStopConfig({
             makerAssetOracle: ethUsdAggregator,
-            takerAssetOracle: ethUsdAggregator,
             initialStopPrice: INITIAL_ETH_PRICE - (INITIAL_ETH_PRICE * TRAILING_DISTANCE / 10000),
             trailingDistance: TRAILING_DISTANCE,
             currentStopPrice: INITIAL_ETH_PRICE - (INITIAL_ETH_PRICE * TRAILING_DISTANCE / 10000),
@@ -486,7 +483,7 @@ contract TrailingStopDemoScript is Script {
         console.log("Should trigger order:", shouldTrigger);
 
         // Get order data
-        (,,,, uint256 currentStopPrice,,,,,,,,,,,) = trailingStopOrder.trailingStopConfigs(orderHash);
+        (,,,, uint256 currentStopPrice,,,,,,,,,,) = trailingStopOrder.trailingStopConfigs(orderHash);
         console.log("Current stop price: $", currentStopPrice / 1e8);
 
         // Get current market price
@@ -534,7 +531,6 @@ contract TrailingStopDemoScript is Script {
 
             TrailingStopOrder.TrailingStopConfig memory config = TrailingStopOrder.TrailingStopConfig({
                 makerAssetOracle: ethUsdAggregator,
-                takerAssetOracle: ethUsdAggregator,
                 initialStopPrice: INITIAL_ETH_PRICE - (INITIAL_ETH_PRICE * TRAILING_DISTANCE / 10000),
                 trailingDistance: TRAILING_DISTANCE,
                 currentStopPrice: INITIAL_ETH_PRICE - (INITIAL_ETH_PRICE * TRAILING_DISTANCE / 10000),
