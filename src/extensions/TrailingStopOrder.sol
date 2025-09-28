@@ -387,11 +387,7 @@ contract TrailingStopOrder is
      * @param makerAssetOracle The Chainlink price feed oracle for maker asset
      * @return normalizedPrice The current price converted to 18 decimals
      */
-    function _getCurrentPriceSecure(AggregatorV3Interface makerAssetOracle)
-        internal
-        view
-        returns (uint256)
-    {
+    function _getCurrentPriceSecure(AggregatorV3Interface makerAssetOracle) internal view returns (uint256) {
         // Get maker asset price with validation
         (, int256 makerPrice,, uint256 makerUpdatedAt,) = makerAssetOracle.latestRoundData();
         if (makerPrice <= 0) {
@@ -409,7 +405,7 @@ contract TrailingStopOrder is
         // Convert price to 18 decimals
         uint256 price = uint256(makerPrice);
         uint8 oracleDecimals = makerAssetOracle.decimals();
-        
+
         if (oracleDecimals < 18) {
             price = price * (10 ** (18 - oracleDecimals));
         } else if (oracleDecimals > 18) {
@@ -1257,8 +1253,7 @@ contract TrailingStopOrder is
             return (false, 0, 0, 0);
         }
 
-        try this.getCurrentPriceSecureExternal(config.makerAssetOracle) returns (uint256 price)
-        {
+        try this.getCurrentPriceSecureExternal(config.makerAssetOracle) returns (uint256 price) {
             currentPrice = price;
             twapPrice = _getTWAPPrice(orderHash);
             stopPrice = config.currentStopPrice;
@@ -1278,11 +1273,7 @@ contract TrailingStopOrder is
      * @param makerOracle The maker asset oracle to query
      * @return price The current price
      */
-    function getCurrentPriceSecureExternal(AggregatorV3Interface makerOracle)
-        external
-        view
-        returns (uint256 price)
-    {
+    function getCurrentPriceSecureExternal(AggregatorV3Interface makerOracle) external view returns (uint256 price) {
         return _getCurrentPriceSecure(makerOracle);
     }
 

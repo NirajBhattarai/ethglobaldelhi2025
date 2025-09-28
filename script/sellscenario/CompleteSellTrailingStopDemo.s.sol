@@ -20,14 +20,13 @@ import {ECDSA} from "@1inch/solidity-utils/libraries/ECDSA.sol";
  * @title CompleteSellTrailingStopDemo
  * @notice Complete demo that creates a SELL trailing stop order, simulates price movements, and fulfills the order
  * @dev This script creates a proper SELL order where maker sells LINK for USDC with trailing stop protection
- * 
+ *
  * DEMO PURPOSE: This script uses demo functions instead of Chainlink Automation upkeep for testing purposes.
  * The TrailingStopKeeper contract has upkeep functionality temporarily commented out and uses updateTrailingStopDemo() instead.
  */
 contract CompleteSellTrailingStopDemo is Script {
     // Contract instances
     MockChainlinkAggregator public linkUsdAggregator;
-    MockChainlinkAggregator public usdcUsdAggregator;
     MockERC20 public mockUSDC;
     MockERC20 public mockLINK;
     LimitOrderProtocol public limitOrderProtocol;
@@ -90,12 +89,9 @@ contract CompleteSellTrailingStopDemo is Script {
 
     function _deployContracts() internal {
         console.log("\n--- STEP 1: DEPLOYING CONTRACTS ---");
-        
+
         linkUsdAggregator = new MockChainlinkAggregator(8, "LINK / USD");
         console.log("MockChainlinkAggregator (LINK/USD) deployed at:", address(linkUsdAggregator));
-
-        usdcUsdAggregator = new MockChainlinkAggregator(8, "USDC / USD");
-        console.log("MockChainlinkAggregator (USDC/USD) deployed at:", address(usdcUsdAggregator));
 
         mockUSDC = new MockERC20("USD Coin", "USDC", 6);
         console.log("MockUSDC deployed at:", address(mockUSDC));
@@ -122,14 +118,10 @@ contract CompleteSellTrailingStopDemo is Script {
 
     function _setupInitialConditions(address maker, address taker) internal {
         console.log("\n--- STEP 2: SETTING UP INITIAL CONDITIONS ---");
-        
+
         // Set initial LINK price
         linkUsdAggregator.setPrice(int256(INITIAL_LINK_PRICE));
         console.log("Initial LINK price set to: $", INITIAL_LINK_PRICE / 1e8);
-
-        // Set initial USDC price (should be $1.00)
-        usdcUsdAggregator.setPrice(1e8); // $1.00
-        console.log("Initial USDC price set to: $1");
 
         // Mint LINK to maker (maker has LINK to sell)
         mockLINK.mint(maker, LINK_AMOUNT);
@@ -138,13 +130,13 @@ contract CompleteSellTrailingStopDemo is Script {
         // Approve protocol to spend LINK
         mockLINK.approve(address(limitOrderProtocol), LINK_AMOUNT);
         console.log("Approved protocol to spend LINK");
-        
+
         // Fund maker with ETH for order execution and gas fees
         vm.deal(maker, 50 ether);
-        
+
         // Fund taker with ETH for order execution
         vm.deal(taker, 10 ether);
-        
+
         // Check balances
         uint256 linkBalance = mockLINK.balanceOf(maker);
         uint256 linkAllowance = mockLINK.allowance(maker, address(limitOrderProtocol));
@@ -210,7 +202,7 @@ contract CompleteSellTrailingStopDemo is Script {
         (, int256 currentPriceInt,,,) = linkUsdAggregator.latestRoundData();
         uint256 currentPrice = uint256(currentPriceInt);
         uint256 initialStopPrice = currentPrice - (currentPrice * TRAILING_DISTANCE / 10000);
-        
+
         console.log("Current LINK price: $", currentPrice / 1e8);
         console.log("Trailing distance: 3%");
         console.log("Initial stop price: $", initialStopPrice / 1e8);
@@ -239,9 +231,9 @@ contract CompleteSellTrailingStopDemo is Script {
         console.log("Trailing stop configured successfully");
 
         // Verify configuration
-        (bool shouldTrigger, uint256 currentPriceCheck, uint256 twapPrice, uint256 stopPrice) = 
+        (bool shouldTrigger, uint256 currentPriceCheck, uint256 twapPrice, uint256 stopPrice) =
             trailingStopOrder.isTrailingStopTriggered(orderHash);
-        
+
         console.log("Trailing stop verification:");
         console.log("- Should trigger:", shouldTrigger);
         console.log("- Current price: $", currentPriceCheck / 1e8);
@@ -251,47 +243,47 @@ contract CompleteSellTrailingStopDemo is Script {
 
     function _simulatePriceMovementsWithKeeper() internal {
         console.log("\n--- STEP 4: SIMULATING PRICE MOVEMENTS WITH KEEPER UPDATES ---");
-        
+
         // Price rises first: $20 → $22 → $25 → $28 → $30 → $32
         console.log("Simulating price rises (trailing stop should follow):");
         int256[] memory risePrices = new int256[](6);
-        risePrices[0] = 22e8;  // $22 (+$2)
-        risePrices[1] = 25e8;  // $25 (+$3)
-        risePrices[2] = 28e8;  // $28 (+$3)
-        risePrices[3] = 30e8;  // $30 (+$2)
-        risePrices[4] = 32e8;  // $32 (+$2)
-        risePrices[5] = 35e8;  // $35 (+$3)
+        risePrices[0] = 22e8; // $22 (+$2)
+        risePrices[1] = 25e8; // $25 (+$3)
+        risePrices[2] = 28e8; // $28 (+$3)
+        risePrices[3] = 30e8; // $30 (+$2)
+        risePrices[4] = 32e8; // $32 (+$2)
+        risePrices[5] = 35e8; // $35 (+$3)
 
         for (uint256 i = 0; i < risePrices.length; i++) {
             linkUsdAggregator.setPrice(risePrices[i]);
             console.log("Price updated to: $", uint256(risePrices[i]) / 1e8);
-            
+
             // Update trailing stop via keeper
             _updateTrailingStopViaKeeper();
-            
+
             vm.warp(block.timestamp + 15); // 15 seconds (more than 10 second update frequency)
         }
 
         // Price drops: $35 → $30 → $25 → $20 → $15 → $10
         console.log("\nSimulating price drops (should trigger sell):");
         int256[] memory dropPrices = new int256[](6);
-        dropPrices[0] = 30e8;  // $30 (-$5)
-        dropPrices[1] = 25e8;  // $25 (-$5)
-        dropPrices[2] = 20e8;  // $20 (-$5)
-        dropPrices[3] = 15e8;  // $15 (-$5)
-        dropPrices[4] = 10e8;  // $10 (-$5)
-        dropPrices[5] = 8e8;   // $8 (-$2) - Should trigger sell order
+        dropPrices[0] = 30e8; // $30 (-$5)
+        dropPrices[1] = 25e8; // $25 (-$5)
+        dropPrices[2] = 20e8; // $20 (-$5)
+        dropPrices[3] = 15e8; // $15 (-$5)
+        dropPrices[4] = 10e8; // $10 (-$5)
+        dropPrices[5] = 8e8; // $8 (-$2) - Should trigger sell order
 
         for (uint256 i = 0; i < dropPrices.length; i++) {
             linkUsdAggregator.setPrice(dropPrices[i]);
             console.log("Price updated to: $", uint256(dropPrices[i]) / 1e8);
-            
+
             // Update trailing stop via keeper
             _updateTrailingStopViaKeeper();
-            
+
             // Check trailing stop status
             _checkTrailingStopStatus();
-            
+
             vm.warp(block.timestamp + 35); // 35 seconds
         }
     }
@@ -300,10 +292,10 @@ contract CompleteSellTrailingStopDemo is Script {
         // DEMO FUNCTION - Directly call the demo update function instead of upkeep
         console.log("  Keeper updating trailing stop (DEMO MODE)...");
         (bool updated, uint256 currentStopPrice) = keeper.updateTrailingStopDemo(orderHash);
-        
+
         // Always show the current stop price for demo purposes
         console.log("  Current stop price: $", currentStopPrice / 1e8);
-        
+
         if (updated) {
             console.log("  [SUCCESS] Trailing stop updated successfully");
         } else {
@@ -312,14 +304,14 @@ contract CompleteSellTrailingStopDemo is Script {
     }
 
     function _checkTrailingStopStatus() internal view {
-        (bool shouldTrigger, uint256 currentPrice, , uint256 stopPrice) = 
+        (bool shouldTrigger, uint256 currentPrice,, uint256 stopPrice) =
             trailingStopOrder.isTrailingStopTriggered(orderHash);
-        
+
         console.log("  Trailing stop status:");
         console.log("  - Should trigger:", shouldTrigger);
         console.log("  - Current price: $", currentPrice / 1e8);
         console.log("  - Stop price: $", stopPrice / 1e8);
-        
+
         if (shouldTrigger) {
             console.log("  *** TRAILING STOP TRIGGERED! ***");
         }
@@ -327,11 +319,11 @@ contract CompleteSellTrailingStopDemo is Script {
 
     function _checkAndExecuteOrder(address taker, uint256 takerPrivateKey) internal {
         console.log("\n--- STEP 5: CHECKING AND EXECUTING ORDER ---");
-        
+
         // Check if trailing stop is triggered
-        (bool shouldTrigger, uint256 currentPrice, uint256 twapPrice, uint256 stopPrice) = 
+        (bool shouldTrigger, uint256 currentPrice, uint256 twapPrice, uint256 stopPrice) =
             trailingStopOrder.isTrailingStopTriggered(orderHash);
-        
+
         console.log("Final trailing stop status:");
         console.log("- Should trigger:", shouldTrigger);
         console.log("- Current price: $", currentPrice / 1e8);
@@ -340,14 +332,14 @@ contract CompleteSellTrailingStopDemo is Script {
 
         if (shouldTrigger) {
             console.log("\n*** EXECUTING SELL ORDER ***");
-            
+
             // Check taker balances before execution
             uint256 takerUsdcBalance = mockUSDC.balanceOf(taker);
             uint256 takerLinkBalance = mockLINK.balanceOf(taker);
             console.log("Taker balances before execution:");
             console.log("- USDC balance:", takerUsdcBalance / 1e6);
             console.log("- LINK balance:", takerLinkBalance / 1e18);
-            
+
             // Ensure taker has enough USDC (double the amount to handle potential double execution)
             uint256 requiredAmount = USDC_AMOUNT * 2; // Double to handle simulation double-execution
             if (takerUsdcBalance < requiredAmount) {
@@ -355,7 +347,7 @@ contract CompleteSellTrailingStopDemo is Script {
                 mockUSDC.mint(taker, requiredAmount - takerUsdcBalance);
                 console.log("Additional USDC minted (double amount for simulation safety)");
             }
-            
+
             // Create taker traits
             OrderBuilderLib.TakerTraitsConfig memory takerConfig = OrderBuilderLib.TakerTraitsConfig({
                 makingAmount: false,
@@ -367,34 +359,34 @@ contract CompleteSellTrailingStopDemo is Script {
                 interaction: "",
                 threshold: USDC_AMOUNT // Taker wants to give USDC amount
             });
-            
+
             (TakerTraits takerTraits,) = orderBuilder.createTakerTraits(takerConfig);
 
             // Execute the order as taker using fillOrderArgs
             vm.startBroadcast(takerPrivateKey);
-            
+
             // Setup taker within broadcast context (same as maker setup)
             console.log("Setting up taker within broadcast context...");
-            
+
             // Mint USDC to taker (taker needs USDC to buy LINK) - mint double amount for safety
             mockUSDC.mint(taker, USDC_AMOUNT * 2);
             console.log("Taker minted", (USDC_AMOUNT * 2) / 1e6, "USDC");
-            
+
             // Approve protocol to spend USDC (taker needs to approve) - approve double amount for safety
             mockUSDC.approve(address(limitOrderProtocol), USDC_AMOUNT * 2);
             console.log("Taker approved protocol to spend USDC (double amount for safety)");
-            
+
             // Also approve LINK for taker (in case needed)
             mockLINK.approve(address(limitOrderProtocol), LINK_AMOUNT);
             console.log("Taker approved protocol to spend LINK");
-            
+
             // Check balances and allowance before execution
             uint256 currentBalance = mockUSDC.balanceOf(taker);
             uint256 allowance = mockUSDC.allowance(taker, address(limitOrderProtocol));
             console.log("Final checks before execution:");
             console.log("- USDC balance:", currentBalance / 1e6);
             console.log("- USDC allowance:", allowance / 1e6);
-            
+
             // Execute the order directly without try-catch
             (uint256 makingAmount, uint256 takingAmount, bytes32 executedOrderHash) = limitOrderProtocol.fillOrderArgs(
                 sellOrder,
@@ -404,31 +396,35 @@ contract CompleteSellTrailingStopDemo is Script {
                 takerTraits,
                 "" // no interaction data for simple execution
             );
-            
+
             console.log("SELL Order executed successfully!");
             console.log("- Making amount:", makingAmount / 1e18, "LINK");
             console.log("- Taking amount:", takingAmount / 1e6, "USDC");
             console.log("- Order hash:", vm.toString(executedOrderHash));
-            
+
             // Check final balances
             uint256 finalUsdcBalance = mockUSDC.balanceOf(taker);
             uint256 finalLinkBalance = mockLINK.balanceOf(taker);
             console.log("- Final USDC balance:", finalUsdcBalance / 1e6);
             console.log("- Final LINK balance:", finalLinkBalance / 1e18);
-            
+
             vm.stopBroadcast();
         } else {
             console.log("\nOrder not triggered - conditions not met");
         }
     }
 
-    function _signOrder(bytes32 orderHashParam, address /* signer */) internal view returns (bytes32 rParam, bytes32 vsParam) {
+    function _signOrder(bytes32 orderHashParam, address /* signer */ )
+        internal
+        view
+        returns (bytes32 rParam, bytes32 vsParam)
+    {
         // Get the maker private key from environment
         uint256 makerPrivateKey = vm.envUint("MAKER_PRIVATE_KEY");
-        
+
         // Sign the order hash directly (not with EIP-712 prefix)
         (uint8 v, bytes32 r_raw, bytes32 s) = vm.sign(makerPrivateKey, orderHashParam);
-        
+
         // Convert to r, vs format (same as in tests)
         rParam = r_raw;
         // For vs format: v is 27 or 28, so we need to subtract 27 and shift left by 255 bits

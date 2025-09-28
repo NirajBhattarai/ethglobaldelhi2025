@@ -9,7 +9,7 @@ import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interf
 /**
  * @title TrailingStopKeeper
  * @notice Keeper contract for managing trailing stop orders with Chainlink Automation
- * 
+ *
  * DEMO PURPOSE: This contract includes updateTrailingStopDemo() function for testing purposes.
  * In production, the upkeep functions (checkUpkeep/performUpkeep) will be called by Chainlink Automation network.
  * For demo purposes, we use updateTrailingStopDemo() function instead.
@@ -75,7 +75,7 @@ contract TrailingStopKeeper is IAutomationCompatible {
         }
 
         // Always get the current stop price for demo display purposes
-        (, , , currentStopPrice) = trailingStopOrder.isTrailingStopTriggered(orderHash);
+        (,,, currentStopPrice) = trailingStopOrder.isTrailingStopTriggered(orderHash);
 
         return (updated, currentStopPrice);
     }
@@ -87,9 +87,9 @@ contract TrailingStopKeeper is IAutomationCompatible {
         if (orderHashes.length == 0) {
             revert NoOrdersToProcess();
         }
-        
+
         // TODO: Put threshold amount of orders to process here
-        
+
         uint256 ordersProcessed = 0;
         uint256 ordersUpdated = 0;
 
