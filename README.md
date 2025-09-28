@@ -522,7 +522,7 @@ Rise 5: 14.7 → 15.0 ETH per BTC → TRIGGERS STOP ORDER!
 
 #### 1. Buy Order Scenario (ETH/USDC)
 ```bash
-forge script script/BuyOrderScenario.s.sol:BuyOrderScenarioScript \
+forge script script/buyscenario/CompleteTrailingStopDemo.s.sol:CompleteTrailingStopDemoScript \
   --rpc-url https://eth-sepolia.g.alchemy.com/v2/YOUR_API_KEY \
   --private-key $PRIVATE_KEY \
   --broadcast \
@@ -531,14 +531,15 @@ forge script script/BuyOrderScenario.s.sol:BuyOrderScenarioScript \
 ```
 
 **What this demonstrates:**
-- 5 gradual price drops ($20, $30, $40, $50, $60)
-- Smart condition checking before each buy
-- DCA strategy with trailing stop protection
+- Complete buy order scenario with trailing stop protection
+- Gradual price drops with smart condition checking
+- DCA strategy implementation
 - Price recovery simulation with stop trigger
+- Full integration with 1inch protocol and Chainlink automation
 
 #### 2. Sell Order Scenario (ETH/USDC)
 ```bash
-forge script script/SellOrderScenario.s.sol:SellOrderScenarioScript \
+forge script script/sellscenario/CompleteSellTrailingStopDemo.s.sol:CompleteSellTrailingStopDemoScript \
   --rpc-url https://eth-sepolia.g.alchemy.com/v2/YOUR_API_KEY \
   --private-key $PRIVATE_KEY \
   --broadcast \
@@ -547,9 +548,10 @@ forge script script/SellOrderScenario.s.sol:SellOrderScenarioScript \
 ```
 
 **What this demonstrates:**
-- 5 gradual price rises ($50, $75, $100, $125, $150)
-- Profit-taking strategy with trailing stop protection
+- Complete sell order scenario with trailing stop protection
+- Gradual price rises with profit-taking strategy
 - Price drop simulation with stop trigger
+- Full integration with 1inch protocol and Chainlink automation
 
 #### 3. Comprehensive Demo (All Scenarios)
 ```bash
@@ -560,6 +562,12 @@ forge script script/TrailingStopDemo.s.sol:TrailingStopDemoScript \
   --verify \
   -vvvv
 ```
+
+**What this demonstrates:**
+- All trading scenarios in one comprehensive demo
+- Both buy and sell order implementations
+- Complete system integration testing
+- End-to-end workflow validation
 
 ## 🔧 Configuration Parameters
 
